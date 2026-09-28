@@ -169,6 +169,30 @@ def principled_input_is_linked(objects, input_name: str) -> bool:
     return False
 
 
+REWIRE_NODE_NAME = "GenStudioBakeEmit"
+
+
+def unlit_color_socket(tree):
+    """The colour socket of a KHR_materials_unlit material, or None.
+
+    Blender's glTF importer builds an unlit material with no Principled BSDF: the
+    base colour (texture x factor) feeds an Emission node, which reaches the output
+    through a Light Path "Is Camera Ray" mix against a Transparent BSDF. Both of the
+    usual routes bake that BLACK at 100% coverage — there is no BSDF to rewire, the
+    DIFFUSE fallback finds no diffuse lobe, and even a plain EMIT bake loses the
+    emission to the light-path mix, because a bake ray is not a camera ray. So the
+    Emission node's Color input is the base colour, and it is re-routed from there.
+
+    Every mesh the editor has viewed unlit is exported unlit too (GLTFLoader loads
+    it as MeshBasicMaterial and the exporter writes the extension back), so this
+    also covers the automatic Before-Optimize/Retopo snapshots of such a mesh.
+    """
+    for node in tree.nodes:
+        if node.type == "EMISSION" and node.name != REWIRE_NODE_NAME:
+            return node.inputs.get("Color")
+    return None
+
+
 def rewire_to_emit(objects, input_name: str) -> tuple[bool, bool]:
     """Route a Principled BSDF input into an Emission shader so EMIT can bake it.
 
@@ -179,7 +203,8 @@ def rewire_to_emit(objects, input_name: str) -> tuple[bool, bool]:
     succeeds but produces a flat map — which is strictly worse than the scalar it
     came from, so the caller reports that rather than pretending the map is useful.
 
-    `rewired` is False when no material had a Principled BSDF to read, which the
+    `rewired` is False when no material had a Principled BSDF (or, for base
+    colour, an unlit Emission — see unlit_color_socket) to read, which the
     caller has to know about: an EMIT bake against a shader graph we never touched
     comes back black rather than wrong-but-plausible.
 
@@ -198,13 +223,19 @@ def rewire_to_emit(objects, input_name: str) -> tuple[bool, bool]:
             tree = material.node_tree
             bsdf = next((n for n in tree.nodes if n.type == "BSDF_PRINCIPLED"), None)
             output = next((n for n in tree.nodes if n.type == "OUTPUT_MATERIAL"), None)
-            if not bsdf or not output:
+            if not output:
                 continue
-            socket = bsdf.inputs.get(input_name)
+            if bsdf:
+                socket = bsdf.inputs.get(input_name)
+            elif input_name == "Base Color":
+                socket = unlit_color_socket(tree)
+            else:
+                socket = None
             if socket is None:
                 continue
 
             emission = tree.nodes.new("ShaderNodeEmission")
+            emission.name = REWIRE_NODE_NAME
             if socket.is_linked:
                 tree.links.new(socket.links[0].from_socket, emission.inputs["Color"])
                 driven_by_graph = True
