@@ -43,16 +43,22 @@ def _render_uv_preview(result) -> bytes | None:
 # autouv.unwrap reports a per-stage fraction (each 0..1). Map each stage into a
 # slice of the global [0,1] bar, with a human-readable label for the UI.
 _UV_STAGE_RANGES = {
-    "weld": (0.00, 0.08),
-    "segment": (0.08, 0.22),
-    "refine": (0.22, 0.45),
-    "parameterize": (0.45, 0.95),
+    "weld": (0.00, 0.05),
+    "hidden": (0.05, 0.10),
+    "segment": (0.10, 0.20),
+    "refine": (0.20, 0.45),
+    "borders": (0.45, 0.60),
+    "parameterize": (0.60, 0.93),
+    "metrics": (0.93, 0.96),
 }
 _UV_STAGE_LABELS = {
     "weld": "Welding vertices",
+    "hidden": "Finding hidden places for seams",
     "segment": "Segmenting charts",
     "refine": "Refining charts",
+    "borders": "Moving seams to hidden edges",
     "parameterize": "Flattening charts",
+    "metrics": "Measuring the layout",
 }
 
 
@@ -86,6 +92,11 @@ def run_auto_uv(mesh: trimesh.Trimesh, options: AutoUvOptions, progress=None,
         normal_smooth_deg=options.normal_smooth_deg,
         source_normals=source_normals,
         preserve_normals=options.preserve_normals,
+        hide_seams=options.hide_seams,
+        hide_strength=options.hide_strength,
+        refine_borders=options.refine_borders,
+        border_rings=options.border_rings,
+        ensure_disks=options.ensure_disks,
         progress=unwrap_progress,
         verbose=False,
     )

@@ -820,7 +820,8 @@
 				{ "FileName": "minimax_h3_audio_vae_fp32.safetensors",            "Url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_audio_vae_fp32.safetensors?download=true",                          "Size": 0.6 }
 			],
 			"LoRA":[        				
-				{ "FileName": "minimax_h3_fl2v_turbo_8step_v1.0_768p_comfyui_resized_avg_rank_64_bf16.safetensors", "Url": "https://huggingface.co/drbaph/MiniMax-H3-Turbo-Lora-ComfyUI/resolve/main/minimax_h3_fl2v_turbo_8step_v1.0_768p_comfyui_resized_avg_rank_64_bf16.safetensors?download=true", "Size": 0.97 }
+				{ "FileName": "minimax_h3_fl2v_turbo_8step_v1.0_768p_comfyui_resized_avg_rank_64_bf16.safetensors", "Url": "https://huggingface.co/drbaph/MiniMax-H3-Turbo-Lora-ComfyUI/resolve/main/minimax_h3_fl2v_turbo_8step_v1.0_768p_comfyui_resized_avg_rank_64_bf16.safetensors?download=true", "Size": 0.97 },
+				{ "FileName": "minimax_h3_flf2v_lora_v1.safetensors", "Url": "https://huggingface.co/pablodawson/MiniMax-H3-360-Orbit-LoRA/resolve/main/minimax_h3_flf2v_lora_v1.safetensors?download=true", "Size": 0.16 }
 			],			
 			"TextEncoder": { "FileName": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors", "Url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors?download=true",          "Size": 15.7 },
 			"Workflows": [
@@ -829,8 +830,9 @@
 					"File": "setup/MiniMax H3 - MultiView Subject.json",
 					"Inputs": [
 						{ "Node": "145", "Input": "image",  "Name": "Source Image", "Type": "Image" },
-						{ "Node": "105:15",  "Input": "noise_seed",  "Name": "Seed",   "Type": "Number" },
-						{ "Node": "115",  "Input": "megapixels", "Name": "Maga Pixels",  "Type": "Number" }
+						{ "Node": "105_15",  "Input": "noise_seed",  "Name": "Seed",   "Type": "Number" },
+						{ "Node": "115",  "Input": "megapixels", "Name": "Maga Pixels",  "Type": "Number" },
+						{ "Node": "160",  "Input": "value", "Name": "Gen 8 images instead of 4",  "Type": "Boolean" }
 					],
 					"Outputs": [
 						{ "Node": "154", "Name": "Save Images", "Type": "Image" }
@@ -1139,6 +1141,30 @@
 			],
 			"Outputs": [
 				{ "Node": "8", "Name": "Save Mesh", "Type": "Mesh" }
+			]
+		},
+		{
+			"Name": "Unwrap Mesh with Trellis2",
+			"File": "setup/Unwrap Mesh with Trellis2.json",
+			"Inputs": [
+				{ "Node": "12", "Input": "glb_path",  "Name": "Source Mesh", "Type": "Mesh" },
+				{ "Node": "9", "Input": "resolution",  "Name": "UV Resolution", "Type": "Number" }
+			],
+			"Outputs": [
+				{ "Node": "6", "Name": "Save Mesh", "Type": "Mesh" }
+			]
+		},
+		{
+			"Name": "Simplify Mesh with UV with Trellis2",
+			"File": "setup/Simplify Mesh with UV with Trellis2.json",
+			"Inputs": [
+				{ "Node": "1", "Input": "glb_path",  "Name": "Source Mesh", "Type": "Mesh" },
+				{ "Node": "3",  "Input": "target_face_num",  "Name": "Target Face Number",   "Type": "Number" },
+				{ "Node": "3",  "Input": "method",  "Name": "Method",   "Type": "String", "Enums":["Cumesh","Meshlib"] },
+				{ "Node": "6", "Input": "resolution",  "Name": "UV Resolution", "Type": "Number" }
+			],
+			"Outputs": [
+				{ "Node": "7", "Name": "Save Mesh", "Type": "Mesh" }
 			]
 		}		
 	]

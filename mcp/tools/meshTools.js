@@ -41,7 +41,16 @@ const AUTO_UV_OPTIONS = {
   padding_texels: z.number().int().min(0).max(64).default(4).describe('Inter-island padding in texels.'),
   // topology repair
   weld: z.boolean().default(true).describe('Proximity-weld coincident verts before unwrapping (stitches shattered shells).'),
-  weld_tol_frac: z.number().min(0).max(1).default(0.1).describe('Weld tolerance as a fraction of median edge length.')
+  weld_tol_frac: z.number().min(0).max(1).default(0.1).describe('Weld tolerance as a fraction of median edge length.'),
+  // shading
+  preserve_normals: z.boolean().default(true).describe("Carry the input mesh's own vertex normals through the unwrap, so shading is unchanged. Turn off to rebuild them from the geometry."),
+  normal_smooth_deg: z.number().min(0).max(180).default(180).describe('Smoothing angle used only when normals are rebuilt (no input normals, or preserve off): edges sharper than this stay hard. 180 = fully smooth, 0 = fully faceted.'),
+  // seam placement
+  hide_seams: z.boolean().default(true).describe('Price seams by visibility (ray-cast occlusion + concavity) so borders and cuts move into creases and hidden places.'),
+  hide_strength: z.number().min(0).max(4).default(1).describe('How much more a seam costs on visible surface than in a hidden crease. 0 = only length and sharpness matter.'),
+  refine_borders: z.boolean().default(true).describe('Move every chart border onto the cheapest route near it (min-cut): shorter, straighter seams on creases/hidden edges. Moves that would flatten worse are refused.'),
+  border_rings: z.number().int().min(1).max(16).default(4).describe('How many face rings either side of a border it may move.'),
+  ensure_disks: z.boolean().default(true).describe('Cut charts that are not a disk (tubes, closed shells, handles, plates with holes that flatten badly) so they flatten without folding.')
 };
 
 const AUTO_RETOPO_OPTIONS = {

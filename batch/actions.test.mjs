@@ -1,9 +1,9 @@
 // node batch/actions.test.mjs
 //
-// Built-in batch actions (Optimize / Auto Rig / Bake): the document rules that
-// let them ride the workflow-shaped binding model, the glTF material patch that
-// applies a bake without a browser, and a whole backend run that chains a
-// ComfyUI mesh into Optimize, Auto Rig and Bake — against a fake backend.
+// Built-in batch actions (Optimize / Auto UV / Auto Rig / Bake): the document
+// rules that let them ride the workflow-shaped binding model, the glTF material
+// patch that applies a bake without a browser, and a whole backend run that
+// chains a ComfyUI mesh into Optimize, Auto Rig and Bake — against a fake backend.
 import assert from 'node:assert/strict';
 import {
   createStage,
@@ -12,6 +12,7 @@ import {
   findParentAssetForStage,
   getStageWorkflow,
   getBatchActionDescriptor,
+  getStageDesktopServices,
   normalizeBatchConfig,
   resolveStageInputs,
   validateBatch
@@ -82,6 +83,15 @@ function tinyGlb({ materials = [{ name: 'Skin', pbrMetallicRoughness: { baseColo
 
 const png = label => Buffer.from(`\x89PNG-${label}`);
 
+// A tinyGlb carrying a one-joint skin, for "does the rig survive" checks.
+function skinnedGlb() {
+  const { json, bin } = parseGlb(tinyGlb());
+  json.nodes.push({ name: 'Hips' });
+  json.skins = [{ joints: [1] }];
+  json.nodes[0].skin = 0;
+  return serializeGlb(json, bin);
+}
+
 // --- the document ----------------------------------------------------------
 
 test('an action stage is described as a workflow, so its defaults seed like one', () => {
@@ -106,6 +116,52 @@ test('a bake reaches two stages back for its high poly', () => {
   const bake = stages[3];
   assert.deepEqual(bake.bindings.low_poly, { source: 'stage', stageId: stages[2].id });
   assert.deepEqual(bake.bindings.high_poly, { source: 'stage', stageId: 'stg-mesh' });
+});
+
+test('a bake after Auto UV bakes onto the unwrapped mesh FROM the generated one', () => {
+  // Auto UV moves no vertex, so the optimized mesh is the same shape as the
+  // unwrapped one: the high poly has to come from before the Optimize.
+  const stages = chain('optimize', 'autouv', 'bake');
+  const bake = stages[4];
+  assert.deepEqual(bake.bindings.low_poly, { source: 'stage', stageId: stages[3].id });
+  assert.deepEqual(bake.bindings.high_poly, { source: 'stage', stageId: 'stg-mesh' });
+  const config = normalizeBatchConfig({ variables: [], groups: [{ id: 'g', name: 'Knight', values: {} }], stages });
+  assert.deepEqual(validateBatch({ config, workflowsById: WORKFLOWS }), [], 'no rebinding needed');
+});
+
+test('Auto UV seeds the Mesh Editor defaults and needs the Mesh Tools service', () => {
+  const stage = seededStage('autouv', chain());
+  assert.equal(stage.inputs.resolution, 1024);
+  assert.equal(stage.inputs.method, 'auto');
+  assert.equal(stage.inputs.preserve_normals, true);
+  assert.deepEqual(stage.bindings.mesh, { source: 'stage', stageId: 'stg-mesh' });
+  assert.deepEqual(getStageDesktopServices(stage), ['meshtools']);
+});
+
+test('Optimize needs Mesh Tools only when its re-unwrap can fire', () => {
+  const optimize = seededStage('optimize', chain());
+  assert.equal(optimize.inputs.auto_uv_if_broken, true, 'on by default for a new stage');
+  assert.deepEqual(getStageDesktopServices(optimize), [], 'seams are protected by default, so -sa never runs');
+  const breaking = { ...optimize, inputs: { ...optimize.inputs, allow_seam_breaking: true } };
+  assert.deepEqual(getStageDesktopServices(breaking), ['meshtools']);
+  assert.deepEqual(getStageDesktopServices({ ...breaking, inputs: { ...breaking.inputs, auto_uv_if_broken: false } }), []);
+  // A variable may turn it on in some group, so the service is started anyway.
+  const byVariable = { ...optimize, bindings: { ...optimize.bindings, allow_seam_breaking: { source: 'variable', variableId: 'v' } } };
+  assert.deepEqual(getStageDesktopServices(byVariable), ['meshtools']);
+});
+
+test('an Optimize stage saved before the re-unwrap existed keeps its behaviour', () => {
+  const stages = chain('optimize');
+  delete stages[2].inputs.auto_uv_if_broken;
+  const { inputs } = resolveStageInputs({
+    stage: stages[2],
+    workflow: getStageWorkflow(stages[2], WORKFLOWS),
+    group: { id: 'g', values: {} },
+    variables: [],
+    stageOutputs: { 'stg-mesh': { id: 44, type: 'mesh' } },
+    stages
+  });
+  assert.equal(inputs.auto_uv_if_broken, false);
 });
 
 test('a first-stage bake takes two different mesh variables', () => {
@@ -242,7 +298,11 @@ function createBackend(stages) {
     linked: [],
     listeners: new Map(),
     nextAssetId: 100,
-    failTool: null
+    failTool: null,
+    // Extra stats the fake gltfpack reports (seams_broken, seam_limited).
+    optimizeStats: {},
+    autoUvTool: { n_charts: 12, fill_ratio: 0.71, overlap_share: 0, flipped_triangles: 0 },
+    inputMesh: null
   };
 
   const addAsset = (asset) => {
@@ -278,7 +338,7 @@ function createBackend(stages) {
         const options = JSON.parse(form.get('options'));
         state.toolCalls.push({ path, options });
         if (state.failTool === path) throw new Error('gltfpack binary not found');
-        return { mesh_b64: tinyGlb().toString('base64'), stats: { triangles: options.target_faces, input_triangles: 90000, target_faces: options.target_faces } };
+        return { mesh_b64: tinyGlb().toString('base64'), stats: { triangles: options.target_faces, input_triangles: 90000, target_faces: options.target_faces, ...state.optimizeStats } };
       }
       if (path === '/meshes/editor/save') {
         const save = { assetId: Number(form.get('assetId')), name: form.get('name'), saveMode: form.get('saveMode'), source: form.get('source'), bytes: Buffer.from(await form.get('meshFile').arrayBuffer()) };
@@ -292,6 +352,11 @@ function createBackend(stages) {
       state.toolCalls.push({ path, options });
       onProgress({ type: 'progress', frac: 0.5, message: 'half way' });
       if (path === '/meshes/rig') return { type: 'done', mesh_b64: tinyGlb().toString('base64'), stats: { bones: 52 } };
+      if (path === '/meshes/auto-uv') {
+        // Marked by its material so a test can tell the unwrapped mesh was saved.
+        const unwrapped = tinyGlb({ materials: [{ name: 'autouv', pbrMetallicRoughness: {} }] });
+        return { type: 'done', mesh_b64: unwrapped.toString('base64'), stats: { tool: state.autoUvTool } };
+      }
       if (path === '/meshes/bake') {
         return {
           type: 'done',
@@ -301,7 +366,7 @@ function createBackend(stages) {
       }
       throw new Error(`unexpected sse ${path}`);
     },
-    async fetchAssetBuffer() { return tinyGlb(); }
+    async fetchAssetBuffer() { return state.inputMesh || tinyGlb(); }
   };
 
   const runner = createBatchRunner({
@@ -380,6 +445,74 @@ test('a failed action is a failed cell, leaves no card, and blocks only its own 
   assert.equal(state.cards.length, 0);
   assert.equal(run.cells[`grp-a:${stages[3].id}`].status, 'error', 'the rig has nothing to consume');
   assert.equal(state.toolCalls.filter(call => call.path === '/meshes/rig').length, 0);
+});
+
+test('an aggressive Optimize re-unwraps the result, and a Bake gets the unwrapped mesh', async () => {
+  const stages = chain('optimize', 'bake');
+  stages[2].inputs = { ...stages[2].inputs, allow_seam_breaking: true, aggressive: true };
+  const { state, runner } = createBackend(stages);
+  state.optimizeStats = { seams_broken: true };
+
+  await runner.start(7, { config: state.config, mode: 'restart' });
+  const run = await settle(runner);
+
+  assert.equal(run.status, 'completed');
+  assert.deepEqual(state.toolCalls.map(call => call.path), ['/meshes/optimize', '/meshes/auto-uv', '/meshes/bake']);
+  assert.equal(state.toolCalls[1].options.resolution, 1024, 'the re-unwrap runs Auto UV at its defaults');
+  assert.equal(state.toolCalls[1].options.hide_seams, true);
+  // What Optimize saved is the unwrapped mesh, so that is what the Bake read.
+  assert.equal(parseGlb(state.saves[0].bytes).json.materials[0].name, 'autouv');
+  const cell = run.cells[`grp-a:${stages[2].id}`];
+  assert.match(cell.warning, /re-unwrapped \(12 islands\)/);
+});
+
+test('with the re-unwrap off, broken seams are reported and nothing else runs', async () => {
+  const stages = chain('optimize');
+  stages[2].inputs = { ...stages[2].inputs, allow_seam_breaking: true, aggressive: true, auto_uv_if_broken: false };
+  const { state, runner } = createBackend(stages);
+  state.optimizeStats = { seams_broken: true };
+
+  await runner.start(7, { config: state.config, mode: 'restart' });
+  const run = await settle(runner);
+
+  assert.deepEqual(state.toolCalls.map(call => call.path), ['/meshes/optimize']);
+  assert.match(run.cells[`grp-a:${stages[2].id}`].warning, /Re-unwrap UVs if seams break/);
+});
+
+test('the re-unwrap does not run when the seams held', async () => {
+  const stages = chain('optimize');
+  const { state, runner } = createBackend(stages);
+  await runner.start(7, { config: state.config, mode: 'restart' });
+  await settle(runner);
+  assert.deepEqual(state.toolCalls.map(call => call.path), ['/meshes/optimize']);
+});
+
+test('an Auto UV stage sends its own settings and flags an overlapping layout and a lost rig', async () => {
+  const { state, api } = createBackend([]);
+  state.assets.set(5, { id: 5, type: 'mesh', name: 'knight', filename: 'meshes/5.glb' });
+  state.inputMesh = skinnedGlb();
+  state.autoUvTool = { n_charts: 30, overlap_share: 0.024, flipped_triangles: 0 };
+
+  const outcome = await executeBatchAction(api, {
+    action: 'autouv',
+    projectId: 7,
+    inputs: { mesh: 'asset:5', resolution: 2048, method: 'lscm', hide_seams: false },
+    name: 'Knight UV',
+    cardKey: 'batch:r:g:s'
+  });
+
+  const options = state.toolCalls[0].options;
+  assert.equal(state.toolCalls[0].path, '/meshes/auto-uv');
+  assert.equal(options.resolution, 2048);
+  assert.equal(options.method, 'lscm');
+  assert.equal(options.hide_seams, false);
+  assert.equal(options.max_cone_deg, 50, 'unset inputs fall back to the defaults');
+  assert.equal('mesh' in options, false, 'the mesh goes as the file, not as an option');
+  assert.equal(outcome.stats.charts, 30);
+  assert.ok(outcome.warnings.some(warning => /2\.4% of the UV layout/.test(warning)), outcome.warnings.join('\n'));
+  assert.ok(outcome.warnings.some(warning => /rig was dropped/.test(warning)));
+  assert.equal(state.saves[0].assetId, 5, 'saved as a version of its input');
+  assert.equal(state.cards[0].column, 'Mesh Edit');
 });
 
 test('an action refuses an input that is not a mesh', async () => {

@@ -145,6 +145,11 @@ export const DEFAULT_AUTO_UV_OPTIONS = {
   weld_tol_frac: 0.1,
   preserve_normals: true,
   normal_smooth_deg: 180,
+  hide_seams: true,
+  hide_strength: 1,
+  refine_borders: true,
+  border_rings: 4,
+  ensure_disks: true,
 }
 
 export function autoUv(meshBlob, opts = {}) {

@@ -5127,6 +5127,13 @@ export default function MeshEditorPage() {
         if (t.n_charts != null) rows.push({ label: 'UV islands', value: t.n_charts })
         if (t.fill_ratio != null) rows.push({ label: 'Atlas fill', value: `${(t.fill_ratio * 100).toFixed(0)}%` })
         if (t.flipped_triangles != null) rows.push({ label: 'Flipped tris', value: t.flipped_triangles })
+        // Share of the used texture area painted by two triangles: folds and
+        // islands crossing themselves, which a flip count cannot see.
+        if (t.overlap_share != null) rows.push({ label: 'Overlap', value: `${(t.overlap_share * 100).toFixed(1)}%` })
+        // 1.00 = isometric; 95th percentile so a few slivers don't dominate.
+        if (t.stretch_energy_p95 != null) rows.push({ label: 'Stretch (p95)', value: t.stretch_energy_p95.toFixed(2) })
+        if (t.density_off_share != null) rows.push({ label: 'Texel density off >25%', value: `${(t.density_off_share * 100).toFixed(1)}%` })
+        if (t.seam_visible_share != null) rows.push({ label: 'Seams on open surface', value: `${(t.seam_visible_share * 100).toFixed(0)}%` })
         if (t.mean_angle_distortion != null) rows.push({ label: 'Angle distortion', value: t.mean_angle_distortion.toFixed(3) })
         return rows
       },

@@ -49,10 +49,8 @@ def render_uv(result, path, size=860, show_stats=True):
     ax.add_collection(poly)
 
     # wireframe
-    segs = []
-    for t in tri:
-        segs += [[t[0], t[1]], [t[1], t[2]], [t[2], t[0]]]
-    lc = LineCollection(segs, colors="#101010", linewidths=0.35, alpha=0.7)
+    segs = tri[:, [0, 1, 1, 2, 2, 0]].reshape(-1, 2, 2)
+    lc =LineCollection(segs, colors="#101010", linewidths=0.35, alpha=0.7)
     ax.add_collection(lc)
 
     # unit-square border
@@ -63,7 +61,8 @@ def render_uv(result, path, size=860, show_stats=True):
     if show_stats:
         s = result.stats
         txt = (f"charts: {s['n_charts']}   faces: {s['n_faces']}\n"
-               f"fill: {s['fill_ratio']:.1%}   flips: {s['flipped_triangles']}\n"
+               f"fill: {s['fill_ratio']:.1%}   flips: {s['flipped_triangles']}   "
+               f"overlap: {s.get('overlap_share', 0.0):.1%}\n"
                f"angle dist: {s['mean_angle_distortion']:.3f}   "
                f"area dist: {s['mean_area_distortion']:.3f}")
         ax.text(0.015, 0.985, txt, va="top", ha="left", fontsize=9,

@@ -35,6 +35,7 @@ import { createApiClient } from './mcp/client.js';
 import { createBatchRunner, mountBatchRuns } from './batch/runner.js';
 import { mountLogs } from './logs.js';
 import { moveGlbPivot, PIVOT_MODES } from './meshPivot.js';
+import { addMissingNormals } from './meshNormals.js';
 import { previewResponseBody, renderVfxFrames } from './vfxPreview.js';
 import { transferRig } from './meshRigTransfer.js';
 // The self-managed PostgreSQL for a shared server that is not running Docker.
@@ -9892,7 +9893,7 @@ function countGlbTriangles(buffer) {
 // Falling back to -sa automatically (as this did, before the error budget was
 // even in play) trades a silently under-simplified mesh for a silently ruined
 // one. Both are silent; the second is worse, because it looks like it worked.
-async function runGltfpack(inputBuffer, ratio, {
+async function runGltfpack(sourceBuffer, ratio, {
   allowSeamBreaking = false,
   simplifyError = DEFAULT_SIMPLIFY_ERROR,
   permissive = false,
@@ -9900,6 +9901,12 @@ async function runGltfpack(inputBuffer, ratio, {
   aggressive = null,
   simplifyUpdate = false,
 } = {}) {
+  // A file with no NORMAL comes back from gltfpack with none either, and glTF
+  // draws that flat-shaded — so a Batch/MCP optimize of a Hunyuan mesh looked
+  // faceted where the Mesh Editor's (whose loader adds normals first) did not.
+  // Giving gltfpack smooth normals from the dense source is what the editor
+  // path already did. A no-op on a file that has them. See meshNormals.js.
+  const inputBuffer = addMissingNormals(sourceBuffer).buffer;
   // `aggressive` splits the destructive pass out from the seam permission so the
   // UI can offer it separately. Existing callers (MCP tools, saved Kanban steps)
   // send only allow_seam_breaking and must keep reaching their target, so when
@@ -10040,6 +10047,9 @@ app.post('/api/meshes/lods', meshToolsUpload.single('meshFile'), async (req, res
     }
     const ratios = requested.map(value => clampSimplifyRatio(value));
     const simplify = readSimplifyOptions(options);
+    // Once for the whole chain rather than once per level inside runGltfpack
+    // (which then finds the normals present and does nothing).
+    const sourceBuffer = addMissingNormals(meshFile.buffer).buffer;
 
     const lods = [];
     for (let level = 0; level < ratios.length; level += 1) {
@@ -10052,7 +10062,7 @@ app.post('/api/meshes/lods', meshToolsUpload.single('meshFile'), async (req, res
         lods.push({ level, ratio, mesh_b64: null, triangles: null, passthrough: true });
         continue;
       }
-      const result = await runGltfpack(meshFile.buffer, ratio, simplify);
+      const result = await runGltfpack(sourceBuffer, ratio, simplify);
       lods.push({
         level,
         ratio,

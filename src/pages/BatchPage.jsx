@@ -32,9 +32,9 @@ import {
   deriveCellsFromAssets,
   getBatchAssetIds,
   getGroupLabel,
-  getBatchActionDescriptor,
   getRunIdFromCells,
   getStageAction,
+  getStageDesktopServices,
   getStageLabel,
   getStageWorkflow,
   isBatchStageWorkflow,
@@ -49,7 +49,7 @@ import './BatchPage.css'
 const AUTOSAVE_DELAY = 700
 
 // A "Batch" preset project: run one linear chain of stages — ComfyUI workflows
-// or the Mesh Editor's Optimize / Auto Rig / Bake — once per
+// or the Mesh Editor's Optimize / Auto UV / Auto Rig / Bake — once per
 // group of parameter values. Each executed cell becomes a normal project Card
 // carrying its asset, so results behave like any other generation.
 export default function BatchPage({ project }) {
@@ -758,9 +758,7 @@ export default function BatchPage({ project }) {
       // can ask it to — the backend running the batch cannot. So every service a
       // built-in stage needs is brought up before the run is handed over, rather
       // than letting each of those cells fail on a connection refused.
-      const services = new Set(normalized.stages
-        .map(stage => getBatchActionDescriptor(getStageAction(stage))?.desktopService)
-        .filter(Boolean))
+      const services = new Set(normalized.stages.flatMap(getStageDesktopServices))
       for (const service of services) {
         await ensureDesktopService(service)
       }

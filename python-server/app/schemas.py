@@ -63,6 +63,23 @@ class AutoUvOptions(BaseModel):
                                                  "normals, or preserve off): edges sharper than this stay hard. "
                                                  "180 = fully smooth, 0 = fully faceted.")
 
+    # --- seam placement ---
+    hide_seams: bool = Field(default=True,
+                             description="Price seams by visibility (ray-cast occlusion + concavity) so borders and "
+                                         "cuts move into creases and hidden places.")
+    hide_strength: float = Field(default=1.0, ge=0.0, le=4.0,
+                                 description="How much more a seam costs on open, visible surface than in a "
+                                             "hidden crease. 0 = only length and sharpness matter.")
+    refine_borders: bool = Field(default=True,
+                                 description="Move every chart border onto the cheapest route near it (min-cut): "
+                                             "shorter, straighter seams on creases / hidden edges. Moves that "
+                                             "would flatten worse are refused.")
+    border_rings: int = Field(default=4, ge=1, le=16,
+                              description="How many face rings either side of a border it may move.")
+    ensure_disks: bool = Field(default=True,
+                               description="Cut charts that are not a disk (tubes, closed shells, handles, plates "
+                                           "with holes that flatten badly) so they flatten without folding.")
+
 
 class AutoRetopoOptions(BaseModel):
     """Every field of autoretopo.RetopoConfig."""

@@ -84,6 +84,24 @@ export default function AutoUvToolsPanel({
       </div>
 
       <div className="mesh-editor-panel__section">
+        <span className="mesh-editor-panel__section-title">Seam placement</span>
+        <ToggleField label="Hide seams" value={o.hide_seams}
+          onChange={v => setOption('hide_seams', v)} disabled={fieldsDisabled}
+          hint="Price seams by visibility (occlusion + concavity) so they move into creases and hidden places" />
+        <RangeField label="Hide strength" min={0} max={4} step={0.1} decimals={1}
+          value={o.hide_strength} onChange={v => setOption('hide_strength', v)}
+          disabled={fieldsDisabled || !o.hide_seams}
+          hint="How much more a seam costs on open surface than in a hidden crease" />
+        <ToggleField label="Move borders to creases" value={o.refine_borders}
+          onChange={v => setOption('refine_borders', v)} disabled={fieldsDisabled}
+          hint="Re-route every chart border along the cheapest nearby path: shorter, straighter, on sharp or hidden edges" />
+        <RangeField label="Border reach" suffix=" rings" min={1} max={16} step={1}
+          value={o.border_rings} onChange={v => setOption('border_rings', v)}
+          disabled={fieldsDisabled || !o.refine_borders}
+          hint="How many face rings either side of a border it may move" />
+      </div>
+
+      <div className="mesh-editor-panel__section">
         <span className="mesh-editor-panel__section-title">Parameterization</span>
         <SelectField label="Method" value={o.method} onChange={v => setOption('method', v)} disabled={fieldsDisabled}
           options={[
@@ -95,6 +113,9 @@ export default function AutoUvToolsPanel({
         <RangeField label="ARAP iterations" min={0} max={100} step={1}
           value={o.arap_iters} onChange={v => setOption('arap_iters', v)} disabled={fieldsDisabled}
           hint="0 disables ARAP (LSCM/planar only)" />
+        <ToggleField label="Cut non-disk charts" value={o.ensure_disks}
+          onChange={v => setOption('ensure_disks', v)} disabled={fieldsDisabled}
+          hint="Open tubes, closed shells and handled charts with the cheapest cut so they flatten without folding" />
       </div>
 
       <div className="mesh-editor-panel__section">

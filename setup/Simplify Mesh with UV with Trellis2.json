@@ -1,0 +1,68 @@
+{
+  "1": {
+    "inputs": {
+      "glb_path": "",
+      "only_vertices_and_faces": true
+    },
+    "class_type": "Trellis2LoadMesh",
+    "_meta": {
+      "title": "Trellis2 - Load Mesh"
+    }
+  },
+  "3": {
+    "inputs": {
+      "target_face_num": 1000000,
+      "method": "Cumesh",
+      "trimesh": [
+        "1",
+        0
+      ]
+    },
+    "class_type": "Trellis2SimplifyTrimesh",
+    "_meta": {
+      "title": "Trellis2 - Simplify Trimesh"
+    }
+  },
+  "5": {
+    "inputs": {
+      "trimesh": [
+        "3",
+        0
+      ]
+    },
+    "class_type": "VisualBrunoToolsTrimeshToMesh",
+    "_meta": {
+      "title": "3d - Trimesh to Mesh"
+    }
+  },
+  "6": {
+    "inputs": {
+      "segmenter": "pec",
+      "resolution": 1024,
+      "padding": 1,
+      "weld_distance": 0,
+      "mesh": [
+        "5",
+        0
+      ]
+    },
+    "class_type": "UnwrapMesh",
+    "_meta": {
+      "title": "Unwrap Mesh UVs"
+    }
+  },
+  "7": {
+    "inputs": {
+      "filename_prefix": "3DGenStudioHy20",
+      "image": "",
+      "mesh": [
+        "6",
+        0
+      ]
+    },
+    "class_type": "SaveGLB",
+    "_meta": {
+      "title": "Save 3D Model"
+    }
+  }
+}

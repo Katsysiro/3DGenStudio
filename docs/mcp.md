@@ -211,7 +211,7 @@ When you *do* pass an image/mesh parameter in `inputs` (e.g. in a kanban project
 
 ### Batch projects
 
-A **Batch** project is a grid, not a graph. `variables` are declared once, each `group` is one **row** of values for them, and `stages` are a linear chain of ComfyUI workflows run once per row — so 4 groups x 3 stages is 12 generations, each saved as an ordinary result card in the project. Three tools cover it:
+A **Batch** project is a grid, not a graph. `variables` are declared once, each `group` is one **row** of values for them, and `stages` are a linear chain run once per row — ComfyUI workflows, or the Mesh Editor's own tools (`optimize`, `autouv`, `autorig`, `bake`), each saving a new version of its input mesh — so 4 groups x 3 stages is 12 generations, each saved as an ordinary result card in the project. Three tools cover it:
 
 | Tool | What it does |
 |---|---|
@@ -243,7 +243,7 @@ A key that still matches nothing is an error listing the workflow's real paramet
 
 ### Parameter-heavy mesh tools
 
-Every mesh operation has a dedicated tool that declares each parameter in its schema with type, range, default, and description (mirroring the Python service's Pydantic models 1:1), so a client can set exactly what it needs and see the valid bounds: `auto_uv_mesh` (14 parameters), `auto_retopo_mesh` (20), `repair_mesh`, `auto_rig_mesh`, `optimize_mesh`, `convert_mesh_fbx`, `inspect_mesh`, `bake_mesh_maps`, `generate_collision`, `generate_lods`, `move_mesh_pivot`, `transfer_rig`. Any subset of options may be set; unset keys fall back to the documented default. For Auto Retopo, the `shell_*` options apply only when `watertight` is `true`. `run_mesh_tool` still accepts every operation with a free-form options object for backward compatibility, but prefer the typed tools.
+Every mesh operation has a dedicated tool that declares each parameter in its schema with type, range, default, and description (mirroring the Python service's Pydantic models 1:1), so a client can set exactly what it needs and see the valid bounds: `auto_uv_mesh` (21 parameters), `auto_retopo_mesh` (20), `repair_mesh`, `auto_rig_mesh`, `optimize_mesh`, `convert_mesh_fbx`, `inspect_mesh`, `bake_mesh_maps`, `generate_collision`, `generate_lods`, `move_mesh_pivot`, `transfer_rig`. Any subset of options may be set; unset keys fall back to the documented default. For Auto Retopo, the `shell_*` options apply only when `watertight` is `true`. `run_mesh_tool` still accepts every operation with a free-form options object for backward compatibility, but prefer the typed tools.
 
 ### The finishing pipeline
 
@@ -313,7 +313,7 @@ Two behaviours worth knowing:
 |---|---|
 | Projects / cards / graph / assets / export / import | just the app running |
 | `run_workflow`, ComfyUI-based edits | ComfyUI running (URL in Settings, default `127.0.0.1:8188`) |
-| `run_batch` | ComfyUI running — a batch is a chain of ComfyUI workflows |
+| `run_batch` | ComfyUI running for workflow stages; the Python mesh-tools service for `autouv` and `bake` stages (and for `optimize` when it re-unwraps broken UVs); the rigging service for `autorig` |
 | `generate_image`, `edit_image`, `generate_mesh`, `generate_mesh_tencent`, `generate_mesh_tripo`, `generate_mesh_hitem`, `edit_mesh`, `texture_mesh`, `rig_mesh_api` | provider API keys in Settings |
 | `auto_uv_mesh`, `auto_retopo_mesh`, `repair_mesh`, `convert_mesh_fbx`, `inspect_mesh`, `bake_mesh_maps`, `generate_collision` | Python mesh-tools service (`:8200`) running — the desktop app can start it from Settings |
 | `auto_rig_mesh` | rigging service (`:8300`) running |

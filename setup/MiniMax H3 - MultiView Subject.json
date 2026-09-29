@@ -2,7 +2,7 @@
   "115": {
     "inputs": {
       "aspect_ratio": "1:1 (Square)",
-      "megapixels": 0.5,
+      "megapixels": 1,
       "multiple": 32
     },
     "class_type": "ResolutionSelector",
@@ -10,35 +10,12 @@
       "title": "Resolution Selector"
     }
   },
-  "119": {
-    "inputs": {
-      "upscale_method": "nearest-exact",
-      "megapixels": 0.9,
-      "resolution_steps": 32
-    },
-    "class_type": "ImageScaleToTotalPixels",
-    "_meta": {
-      "title": "Scale Image to Total Pixels"
-    }
-  },
-  "120": {
-    "inputs": {
-      "image": [
-        "119",
-        0
-      ]
-    },
-    "class_type": "GetImageSize",
-    "_meta": {
-      "title": "Get Image Size"
-    }
-  },
   "129": {
     "inputs": {
       "batch_index": 0,
       "length": 1,
       "image": [
-        "105:10",
+        "105_10",
         0
       ]
     },
@@ -49,10 +26,10 @@
   },
   "130": {
     "inputs": {
-      "batch_index": 30,
+      "batch_index": 18,
       "length": 1,
       "image": [
-        "105:10",
+        "105_10",
         0
       ]
     },
@@ -63,10 +40,10 @@
   },
   "131": {
     "inputs": {
-      "batch_index": 50,
+      "batch_index": 36,
       "length": 1,
       "image": [
-        "105:10",
+        "105_10",
         0
       ]
     },
@@ -77,10 +54,10 @@
   },
   "132": {
     "inputs": {
-      "batch_index": 72,
+      "batch_index": 54,
       "length": 1,
       "image": [
-        "105:10",
+        "105_10",
         0
       ]
     },
@@ -91,7 +68,7 @@
   },
   "144": {
     "inputs": {
-      "padding": 30,
+      "padding": 50,
       "remove_background": false,
       "max_size": 1024,
       "image": [
@@ -140,7 +117,7 @@
   "154": {
     "inputs": {
       "images": [
-        "153",
+        "159",
         0
       ]
     },
@@ -149,7 +126,146 @@
       "title": "Preview Image"
     }
   },
-  "105:11": {
+  "155": {
+    "inputs": {
+      "lora_name": "minimax_h3_flf2v_lora_v1.safetensors",
+      "strength_model": 1,
+      "model": [
+        "105_122",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "Load LoRA"
+    }
+  },
+  "159": {
+    "inputs": {
+      "switch": [
+        "160",
+        0
+      ],
+      "on_false": [
+        "153",
+        0
+      ],
+      "on_true": [
+        "161",
+        0
+      ]
+    },
+    "class_type": "ComfySwitchNode",
+    "_meta": {
+      "title": "If/Else Switch"
+    }
+  },
+  "160": {
+    "inputs": {
+      "value": true
+    },
+    "class_type": "PrimitiveBoolean",
+    "_meta": {
+      "title": "Generate 8 Images instead of 4"
+    }
+  },
+  "161": {
+    "inputs": {
+      "images.image0": [
+        "129",
+        0
+      ],
+      "images.image1": [
+        "163",
+        0
+      ],
+      "images.image2": [
+        "130",
+        0
+      ],
+      "images.image3": [
+        "164",
+        0
+      ],
+      "images.image4": [
+        "131",
+        0
+      ],
+      "images.image5": [
+        "165",
+        0
+      ],
+      "images.image6": [
+        "132",
+        0
+      ],
+      "images.image7": [
+        "166",
+        0
+      ]
+    },
+    "class_type": "BatchImagesNode",
+    "_meta": {
+      "title": "Batch Images"
+    }
+  },
+  "163": {
+    "inputs": {
+      "batch_index": 9,
+      "length": 1,
+      "image": [
+        "105_10",
+        0
+      ]
+    },
+    "class_type": "ImageFromBatch",
+    "_meta": {
+      "title": "Get Image from Batch"
+    }
+  },
+  "164": {
+    "inputs": {
+      "batch_index": 27,
+      "length": 1,
+      "image": [
+        "105_10",
+        0
+      ]
+    },
+    "class_type": "ImageFromBatch",
+    "_meta": {
+      "title": "Get Image from Batch"
+    }
+  },
+  "165": {
+    "inputs": {
+      "batch_index": 45,
+      "length": 1,
+      "image": [
+        "105_10",
+        0
+      ]
+    },
+    "class_type": "ImageFromBatch",
+    "_meta": {
+      "title": "Get Image from Batch"
+    }
+  },
+  "166": {
+    "inputs": {
+      "batch_index": 63,
+      "length": 1,
+      "image": [
+        "105_10",
+        0
+      ]
+    },
+    "class_type": "ImageFromBatch",
+    "_meta": {
+      "title": "Get Image from Batch"
+    }
+  },
+  "105_11": {
     "inputs": {
       "vae_name": "minimax_h3_video_vae_fp16.safetensors"
     },
@@ -158,7 +274,7 @@
       "title": "Load VAE"
     }
   },
-  "105:17": {
+  "105_17": {
     "inputs": {
       "sampler_name": "res_multistep"
     },
@@ -167,69 +283,7 @@
       "title": "KSamplerSelect"
     }
   },
-  "105:9": {
-    "inputs": {
-      "scheduler": "simple",
-      "steps": [
-        "105:123",
-        0
-      ],
-      "denoise": 1,
-      "model": [
-        "105:122",
-        0
-      ]
-    },
-    "class_type": "BasicScheduler",
-    "_meta": {
-      "title": "BasicScheduler"
-    }
-  },
-  "105:14": {
-    "inputs": {
-      "noise": [
-        "105:15",
-        0
-      ],
-      "guider": [
-        "105:16",
-        0
-      ],
-      "sampler": [
-        "105:17",
-        0
-      ],
-      "sigmas": [
-        "105:9",
-        0
-      ],
-      "latent_image": [
-        "105:104",
-        1
-      ]
-    },
-    "class_type": "SamplerCustomAdvanced",
-    "_meta": {
-      "title": "SamplerCustomAdvanced"
-    }
-  },
-  "105:16": {
-    "inputs": {
-      "model": [
-        "105:122",
-        0
-      ],
-      "conditioning": [
-        "105:104",
-        0
-      ]
-    },
-    "class_type": "BasicGuider",
-    "_meta": {
-      "title": "Basic Guider"
-    }
-  },
-  "105:13": {
+  "105_13": {
     "inputs": {
       "clip_name": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
       "type": "minimax",
@@ -240,9 +294,111 @@
       "title": "Load CLIP"
     }
   },
-  "105:104": {
+  "105_111": {
     "inputs": {
-      "prompt": "[Shot 1] At 00:00.00, front facing camera, black background.\n[Shot 2] At 00:01.00, left side view at 90°, black background.\n[Shot 3] At 00:02.00, back view at 180°, black background.\n[Shot 4] At 00:03.00, right side view at 270°, black background.",
+      "value": 3
+    },
+    "class_type": "PrimitiveFloat",
+    "_meta": {
+      "title": "Float (duration)"
+    }
+  },
+  "105_124": {
+    "inputs": {
+      "value": 20
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "Int"
+    }
+  },
+  "105_125": {
+    "inputs": {
+      "value": 8
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "Int"
+    }
+  },
+  "105_126": {
+    "inputs": {
+      "value": true
+    },
+    "class_type": "PrimitiveBoolean",
+    "_meta": {
+      "title": "Boolean (Enable Lightning LoRA)"
+    }
+  },
+  "105_15": {
+    "inputs": {
+      "noise_seed": 12345
+    },
+    "class_type": "RandomNoise",
+    "_meta": {
+      "title": "RandomNoise"
+    }
+  },
+  "105_6": {
+    "inputs": {
+      "unet_name": "{diffusion_model}",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "Load Diffusion Model"
+    }
+  },
+  "105_107": {
+    "inputs": {
+      "expression": "max(5, round(a * 24)) + (5 - (max(5, round(a * 24)) % 17)) % 17",
+      "values.a": [
+        "105_111",
+        0
+      ]
+    },
+    "class_type": "ComfyMathExpression",
+    "_meta": {
+      "title": "Math Expression"
+    }
+  },
+  "105_123": {
+    "inputs": {
+      "switch": [
+        "105_126",
+        0
+      ],
+      "on_false": [
+        "105_124",
+        0
+      ],
+      "on_true": [
+        "105_125",
+        0
+      ]
+    },
+    "class_type": "ComfySwitchNode",
+    "_meta": {
+      "title": "If/Else Switch (Steps)"
+    }
+  },
+  "105_121": {
+    "inputs": {
+      "lora_name": "minimax_h3_fl2v_turbo_8step_v1.0_768p_comfyui_resized_avg_rank_64_bf16.safetensors",
+      "strength_model": 1,
+      "model": [
+        "105_6",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "Load LoRA"
+    }
+  },
+  "105_104": {
+    "inputs": {
+      "prompt": "One frozen instant. Only the camera moves. In a continuous 360 orbit. Preserve every person and object in exactly the same world position, orientation, shape and pose throughout the shot. Airborne objects remain suspended at the captured height and angle: no wobbling, shaking, spinning, drifting, falling or continued action. Keep faces, hands, clothing, liquids and the background motionless while retaining their natural appearance. Camera parallax is the only source of apparent movement. No cuts, zoom, morphing or added objects.",
       "width": [
         "115",
         0
@@ -252,18 +408,22 @@
         1
       ],
       "length": [
-        "105:107",
+        "105_107",
         1
       ],
       "clip": [
-        "105:13",
+        "105_13",
         0
       ],
       "vae": [
-        "105:11",
+        "105_11",
         0
       ],
       "first_frame": [
+        "144",
+        0
+      ],
+      "last_frame": [
         "144",
         0
       ]
@@ -273,126 +433,18 @@
       "title": "MiniMax H3 Image to Video"
     }
   },
-  "105:107": {
-    "inputs": {
-      "expression": "max(5, round(a * 24)) + (5 - (max(5, round(a * 24)) % 17)) % 17",
-      "values.a": [
-        "105:111",
-        0
-      ]
-    },
-    "class_type": "ComfyMathExpression",
-    "_meta": {
-      "title": "Math Expression"
-    }
-  },
-  "105:111": {
-    "inputs": {
-      "value": 3
-    },
-    "class_type": "PrimitiveFloat",
-    "_meta": {
-      "title": "Float (duration)"
-    }
-  },
-  "105:121": {
-    "inputs": {
-      "lora_name": "minimax_h3_fl2v_turbo_8step_v1.0_768p_comfyui_resized_avg_rank_64_bf16.safetensors",
-      "strength_model": 1,
-      "model": [
-        "105:6",
-        0
-      ]
-    },
-    "class_type": "LoraLoaderModelOnly",
-    "_meta": {
-      "title": "Load LoRA"
-    }
-  },
-  "105:123": {
+  "105_122": {
     "inputs": {
       "switch": [
-        "105:126",
+        "105_126",
         0
       ],
       "on_false": [
-        "105:124",
+        "105_6",
         0
       ],
       "on_true": [
-        "105:125",
-        0
-      ]
-    },
-    "class_type": "ComfySwitchNode",
-    "_meta": {
-      "title": "If/Else Switch (Steps)"
-    }
-  },
-  "105:124": {
-    "inputs": {
-      "value": 20
-    },
-    "class_type": "PrimitiveInt",
-    "_meta": {
-      "title": "Int"
-    }
-  },
-  "105:125": {
-    "inputs": {
-      "value": 8
-    },
-    "class_type": "PrimitiveInt",
-    "_meta": {
-      "title": "Int"
-    }
-  },
-  "105:126": {
-    "inputs": {
-      "value": true
-    },
-    "class_type": "PrimitiveBoolean",
-    "_meta": {
-      "title": "Boolean (Enable Lightning LoRA)"
-    }
-  },
-  "105:10": {
-    "inputs": {
-      "samples": [
-        "105:14",
-        0
-      ],
-      "vae": [
-        "105:11",
-        0
-      ]
-    },
-    "class_type": "VAEDecode",
-    "_meta": {
-      "title": "VAE Decode"
-    }
-  },
-  "105:15": {
-    "inputs": {
-      "noise_seed": 757358688076805
-    },
-    "class_type": "RandomNoise",
-    "_meta": {
-      "title": "RandomNoise"
-    }
-  },
-  "105:122": {
-    "inputs": {
-      "switch": [
-        "105:126",
-        0
-      ],
-      "on_false": [
-        "105:6",
-        0
-      ],
-      "on_true": [
-        "105:121",
+        "105_121",
         0
       ]
     },
@@ -401,14 +453,82 @@
       "title": "If/Else Switch (Model)"
     }
   },
-  "105:6": {
+  "105_16": {
     "inputs": {
-      "unet_name": "{diffusion_model}",
-      "weight_dtype": "default"
+      "model": [
+        "155",
+        0
+      ],
+      "conditioning": [
+        "105_104",
+        0
+      ]
     },
-    "class_type": "UNETLoader",
+    "class_type": "BasicGuider",
     "_meta": {
-      "title": "Load Diffusion Model"
+      "title": "Basic Guider"
+    }
+  },
+  "105_9": {
+    "inputs": {
+      "scheduler": "simple",
+      "steps": [
+        "105_123",
+        0
+      ],
+      "denoise": 1,
+      "model": [
+        "155",
+        0
+      ]
+    },
+    "class_type": "BasicScheduler",
+    "_meta": {
+      "title": "BasicScheduler"
+    }
+  },
+  "105_14": {
+    "inputs": {
+      "noise": [
+        "105_15",
+        0
+      ],
+      "guider": [
+        "105_16",
+        0
+      ],
+      "sampler": [
+        "105_17",
+        0
+      ],
+      "sigmas": [
+        "105_9",
+        0
+      ],
+      "latent_image": [
+        "105_104",
+        1
+      ]
+    },
+    "class_type": "SamplerCustomAdvanced",
+    "_meta": {
+      "title": "SamplerCustomAdvanced"
+    }
+  },
+  "105_10": {
+    "inputs": {
+      "samples": [
+        "105_14",
+        0
+      ],
+      "vae": [
+        "105_11",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
     }
   }
 }

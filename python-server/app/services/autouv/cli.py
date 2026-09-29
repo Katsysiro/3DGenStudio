@@ -55,6 +55,19 @@ def _add_unwrap_args(p: argparse.ArgumentParser) -> None:
                    help="as-rigid-as-possible flattening iterations per chart; "
                         "0 disables ARAP (LSCM/planar only). Higher = lower "
                         "area distortion (default 4)")
+    p.add_argument("--no-hide-seams", action="store_false", dest="hide_seams",
+                   help="do not price seams by visibility (occlusion + concavity)")
+    p.add_argument("--hide-strength", type=float, default=1.0, dest="hide_strength",
+                   help="extra cost of a seam on visible surface vs a hidden "
+                        "crease (default 1.0; 0 = length and sharpness only)")
+    p.add_argument("--no-border-refine", action="store_false", dest="refine_borders",
+                   help="keep the chart borders exactly where segmentation "
+                        "left them (skip the min-cut border move)")
+    p.add_argument("--border-rings", type=int, default=4, dest="border_rings",
+                   help="face rings either side of a border it may move (default 4)")
+    p.add_argument("--no-disk-cuts", action="store_false", dest="ensure_disks",
+                   help="flatten non-disk charts (tubes, closed shells) as they "
+                        "are instead of cutting them open")
     p.add_argument("--resolution", type=int, default=1024,
                    help="target texture resolution used for padding (default 1024)")
     p.add_argument("--padding", type=int, default=4, dest="padding_texels",
@@ -98,6 +111,11 @@ def _cmd_unwrap(args: argparse.Namespace) -> int:
         weld_tol_frac=args.weld_tol_frac,
         normal_smooth_deg=args.normal_smooth_deg,
         arap_iters=args.arap_iters,
+        hide_seams=args.hide_seams,
+        hide_strength=args.hide_strength,
+        refine_borders=args.refine_borders,
+        border_rings=args.border_rings,
+        ensure_disks=args.ensure_disks,
         progress=None if args.quiet else _progress,
         verbose=not args.quiet,
     )

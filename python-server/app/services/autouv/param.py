@@ -22,9 +22,14 @@ lowest combined (angle + area) distortion with no flips.
 """
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 from scipy.sparse import coo_matrix, csc_matrix
-from scipy.sparse.linalg import spsolve, splu
+from scipy.sparse.linalg import spsolve, splu, MatrixRankWarning
+
+from .metrics import triangle_frames, signed_uv_area, jacobians, singular_values, island_overlap
+from . import topology as _topology
 
 
 # --------------------------------------------------------------------- helpers
@@ -51,21 +56,6 @@ def _boundary_vertices(local_faces, n_verts):
     return np.unique(bedges.reshape(-1))
 
 
-def _triangle_local_coords(p0, p1, p2):
-    """Isometrically flatten one triangle into 2D local coordinates."""
-    e1 = p1 - p0
-    len1 = np.linalg.norm(e1)
-    if len1 < 1e-12:
-        return None
-    x_axis = e1 / len1
-    e2 = p2 - p0
-    proj = np.dot(e2, x_axis)
-    perp = e2 - proj * x_axis
-    h = np.linalg.norm(perp)
-    # (x,y) of the three corners
-    return np.array([[0.0, 0.0], [len1, 0.0], [proj, h]])
-
-
 # ------------------------------------------------------------------------ LSCM
 def lscm(local_verts, local_faces):
     """Solve LSCM. Returns (uv, ok)."""
@@ -84,35 +74,29 @@ def lscm(local_verts, local_faces):
     if p0 == p1:
         return None, False
 
-    rows, cols, vals = [], [], []
+    # One complex conformality equation per triangle (real + imaginary row),
+    # assembled for every triangle at once.
     nt = len(local_faces)
-    for t, (i, j, k) in enumerate(local_faces):
-        loc = _triangle_local_coords(local_verts[i], local_verts[j],
-                                     local_verts[k])
-        if loc is None:
-            continue
-        (x0, y0), (x1, y1), (x2, y2) = loc
-        # W = opposite edge of each vertex, as a complex number a + i b
-        W = np.array([
-            (x2 - x1) + 1j * (y2 - y1),
-            (x0 - x2) + 1j * (y0 - y2),
-            (x1 - x0) + 1j * (y1 - y0),
-        ])
-        area2 = abs((x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0))
-        w = 1.0 / np.sqrt(area2 + 1e-12)
-        idx = (i, j, k)
-        r_real = 2 * t
-        r_imag = 2 * t + 1
-        for vtx, Wv in zip(idx, W):
-            a, b = w * Wv.real, w * Wv.imag
-            # Real:  a*u - b*v
-            rows += [r_real, r_real]
-            cols += [vtx, n + vtx]
-            vals += [a, -b]
-            # Imag:  b*u + a*v
-            rows += [r_imag, r_imag]
-            cols += [vtx, n + vtx]
-            vals += [b, a]
+    P, _ = triangle_frames(local_verts, local_faces)
+    valid = P[:, 1, 0] >= 1e-12                 # skip zero-length first edges
+    x0, y0 = P[:, 0, 0], P[:, 0, 1]
+    x1, y1 = P[:, 1, 0], P[:, 1, 1]
+    x2, y2 = P[:, 2, 0], P[:, 2, 1]
+    # W = opposite edge of each vertex, as a complex number a + i b
+    Wre = np.stack([x2 - x1, x0 - x2, x1 - x0], axis=1)
+    Wim = np.stack([y2 - y1, y0 - y2, y1 - y0], axis=1)
+    area2 = np.abs((x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0))
+    w = 1.0 / np.sqrt(area2 + 1e-12)
+    a = (w[:, None] * Wre)[valid]               # (T, 3)
+    b = (w[:, None] * Wim)[valid]
+    vtx = local_faces[valid]
+    t = np.nonzero(valid)[0][:, None].repeat(3, axis=1)
+    r_real = 2 * t
+    r_imag = 2 * t + 1
+    # Real:  a*u - b*v      Imag:  b*u + a*v
+    rows = np.concatenate([r_real, r_real, r_imag, r_imag], axis=None)
+    cols = np.concatenate([vtx, n + vtx, vtx, n + vtx], axis=None)
+    vals = np.concatenate([a, -b, b, a], axis=None)
 
     M = coo_matrix((vals, (rows, cols)), shape=(2 * nt, 2 * n)).tocsc()
 
@@ -126,7 +110,11 @@ def lscm(local_verts, local_faces):
     A = (Mf.T @ Mf).tocsc()
     bvec = Mf.T @ rhs
     try:
-        xf = spsolve(A, bvec)
+        # A singular system (degenerate chart) is caught by the finiteness test
+        # below and falls back to another flattening; the warning is only noise.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", MatrixRankWarning)
+            xf = spsolve(A, bvec)
     except Exception:
         return None, False
     if not np.all(np.isfinite(xf)):
@@ -285,45 +273,22 @@ def distortion(local_verts, local_faces, uv):
     """
     eps = 1e-12
     cap = 50.0
-    tot_w = 0.0
-    tot = 0.0
-    areas3, areas2 = [], []
-    for (i, j, k) in local_faces:
-        loc = _triangle_local_coords(local_verts[i], local_verts[j],
-                                     local_verts[k])
-        if loc is None:
-            continue
-        P = loc
-        Q = uv[[i, j, k]]
-        a3 = abs((P[1, 0] - P[0, 0]) * (P[2, 1] - P[0, 1]) -
-                 (P[2, 0] - P[0, 0]) * (P[1, 1] - P[0, 1])) * 0.5
-        a2 = abs((Q[1, 0] - Q[0, 0]) * (Q[2, 1] - Q[0, 1]) -
-                 (Q[2, 0] - Q[0, 0]) * (Q[1, 1] - Q[0, 1])) * 0.5
-        if a3 < eps:
-            continue
-        Pm = np.array([P[1] - P[0], P[2] - P[0]]).T
-        Qm = np.array([Q[1] - Q[0], Q[2] - Q[0]]).T
-        try:
-            J = Qm @ np.linalg.inv(Pm)
-        except np.linalg.LinAlgError:
-            continue
-        s = np.linalg.svd(J, compute_uv=False)
-        s = np.clip(s, eps, None)
-        qc = 0.5 * (s[0] / s[1] + s[1] / s[0])       # >= 1, =1 if conformal
-        qc = min(qc, cap)
-        tot += a3 * qc
-        tot_w += a3
-        areas3.append(a3)
-        areas2.append(a2)
-    if tot_w == 0:
+    P, a3 = triangle_frames(local_verts, local_faces)
+    a2 = np.abs(signed_uv_area(uv, local_faces))
+    keep = a3 >= eps
+    if not keep.any():
         return cap, cap
-    angle_d = tot / tot_w
-    areas3 = np.array(areas3)
-    areas2 = np.array(areas2)
-    if areas2.sum() > 0:
-        ratio = areas2 / areas3
-        ratio /= (ratio * areas3).sum() / areas3.sum()
-        area_d = float(np.sqrt(np.average((ratio - 1.0) ** 2, weights=areas3)))
+    J, ok = jacobians(P[keep], uv, local_faces[keep])
+    a3k, a2k = a3[keep][ok], a2[keep][ok]
+    if len(a3k) == 0:
+        return cap, cap
+    sv = np.clip(singular_values(J[ok]), eps, None)
+    qc = np.minimum(0.5 * (sv[:, 0] / sv[:, 1] + sv[:, 1] / sv[:, 0]), cap)
+    angle_d = float((a3k * qc).sum() / a3k.sum())
+    if a2k.sum() > 0:
+        ratio = a2k / a3k
+        ratio /= (ratio * a3k).sum() / a3k.sum()
+        area_d = float(np.sqrt(np.average((ratio - 1.0) ** 2, weights=a3k)))
     else:
         area_d = cap
     return angle_d, area_d
@@ -331,23 +296,18 @@ def distortion(local_verts, local_faces, uv):
 
 def count_flips(local_faces, uv):
     """Number of triangles whose orientation flipped in UV space."""
-    signs = []
-    for (i, j, k) in local_faces:
-        Q = uv[[i, j, k]]
-        s = (Q[1, 0] - Q[0, 0]) * (Q[2, 1] - Q[0, 1]) - \
-            (Q[2, 0] - Q[0, 0]) * (Q[1, 1] - Q[0, 1])
-        signs.append(s)
-    signs = np.array(signs)
-    pos = np.sum(signs > 0)
-    neg = np.sum(signs < 0)
-    return int(min(pos, neg))
+    s = signed_uv_area(uv, local_faces)
+    return int(min(np.sum(s > 0), np.sum(s < 0)))
 
 
-def parameterize_chart(vertices, faces, face_ids, method="auto", arap_iters=4):
-    """Flatten one chart. Returns (local_uv, uniq_vertex_ids, local_faces, info)."""
-    lv, lf, uniq = _chart_local(vertices, faces, face_ids)
-    info = {"method": None, "angle_d": None, "area_d": None, "flips": 0}
+def _flatten(lv, lf, method="auto", arap_iters=4):
+    """Best-of flattening of one manifold chart.
 
+    Returns ``(name, uv, angle_d, area_d, flips, overlap)``. ``overlap`` is the
+    island's self-overlap share (see :func:`metrics.island_overlap`): a layout
+    can be flip-free and still fold its boundary back over its own interior,
+    which a flip count never sees, so candidates are ranked on it too.
+    """
     candidates = []
     lscm_uv = None
     if method in ("auto", "lscm", "arap"):
@@ -359,11 +319,11 @@ def parameterize_chart(vertices, faces, face_ids, method="auto", arap_iters=4):
             lscm_uv = uv
             if method in ("auto", "lscm"):
                 ad, ar = distortion(lv, lf, uv)
-                candidates.append(("lscm", uv, ad, ar, count_flips(lf, uv)))
+                candidates.append(("lscm", uv, ad, ar, count_flips(lf, uv), island_overlap(uv, lf)))
     if method in ("auto", "planar", "arap") or not candidates:
         uv = planar(lv, lf)
         ad, ar = distortion(lv, lf, uv)
-        candidates.append(("planar", uv, ad, ar, count_flips(lf, uv)))
+        candidates.append(("planar", uv, ad, ar, count_flips(lf, uv), island_overlap(uv, lf)))
 
     # ARAP: refine the best available initialisation toward an isometric map.
     # Conformal LSCM preserves angles but lets area (texel density) drift on the
@@ -376,13 +336,98 @@ def parameterize_chart(vertices, faces, face_ids, method="auto", arap_iters=4):
             if count_flips(lf, uv) > len(lf) // 2:
                 uv[:, 1] *= -1.0
             ad, ar = distortion(lv, lf, uv)
-            candidates.append(("arap", uv, ad, ar, count_flips(lf, uv)))
+            candidates.append(("arap", uv, ad, ar, count_flips(lf, uv), island_overlap(uv, lf)))
 
-    # choose the candidate with fewest flips, then lowest combined distortion
-    def score(c):
-        _, _, ad, ar, fl = c
-        return (fl, ad + 2.0 * ar)
+    return min(candidates, key=_score)
 
-    name, uv, ad, ar, fl = min(candidates, key=score)
-    info.update(method=name, angle_d=float(ad), area_d=float(ar), flips=int(fl))
+
+# A flattening whose island overlaps itself by more than this share is not
+# accepted as it is: the merge validation refuses it, and the fast path falls
+# back to the full best-of search.
+OVERLAP_TOL = 0.02
+# Weight of the self-overlap share against distortion when ranking candidates:
+# 1% of the island painted twice costs as much as 0.05 of area distortion. A
+# hard "no overlap first" rule picked badly stretched planar projections over
+# ARAP layouts with a small folded tip -- worse texel density everywhere to
+# save a few texels in one place.
+OVERLAP_WEIGHT = 10.0
+
+
+def _score(c):
+    """Fewest flips, then distortion with self-overlap as a weighted penalty."""
+    _, _, ad, ar, fl, ov = c
+    return (fl, ad + 2.0 * ar + OVERLAP_WEIGHT * ov)
+
+
+def parameterize_chart(vertices, faces, face_ids, method="auto", arap_iters=4,
+                       vertex_weight=None, make_disk=True, fast=False):
+    """Flatten one chart. Returns (local_uv, uniq_vertex_ids, local_faces, info).
+
+    The chart is first made manifold (:func:`topology.split_corners`) and, with
+    ``make_disk``, cut to a disk (:func:`topology.make_disk`). ``uniq`` maps
+    every local vertex to its vertex in ``vertices``; after a cut several local
+    vertices share one source vertex, which is exactly what a seam is.
+    ``local_faces`` stays row-aligned with ``face_ids``.
+
+    A chart with holes but no handles can be flattened as it is -- LSCM copes
+    with an annulus -- so it is flattened both ways and only cut when the cut
+    layout is clearly better (fewer flips, or 10% lower distortion). Closed and
+    handled charts have no valid planar embedding and are always cut.
+
+    ``vertex_weight`` (per vertex of ``vertices``) makes cuts avoid expensive
+    (visible) places. ``fast`` tries LSCM alone and only falls back to the full
+    best-of search when LSCM flips or folds over itself; it is what the
+    chart-merge and border-move validations use.
+    """
+    lv0, lf0, uniq0 = _chart_local(vertices, faces, face_ids)
+    info = {"method": None, "angle_d": None, "area_d": None, "flips": 0,
+            "cut": "disk", "cut_edges": 0, "components": 1}
+
+    fn = _topology.face_normals(lv0, lf0)
+    lf1, orig1, _, n_comp = _topology.split_corners(lf0, len(lv0), fn)
+    info["components"] = n_comp
+    if n_comp > 1:
+        # Only reachable through the merge validation (the unwrapper splits
+        # disconnected charts up front): flatten the raw chart as before and
+        # let the caller's flip test decide.
+        variants = [("raw", lv0, lf0, uniq0)]
+    else:
+        lv1, uniq1 = lv0[orig1], uniq0[orig1]
+        variants = []
+        topo = _topology.topology(lf1, len(lv1))
+        if topo.is_disk or (topo.n_loops > 0 and topo.genus <= 0) or not make_disk:
+            variants.append(("disk" if topo.is_disk else "none", lv1, lf1, uniq1))
+        if make_disk and not topo.is_disk:
+            w = vertex_weight[uniq1] if vertex_weight is not None else None
+            lf2, orig2, kind, n_cut = _topology.make_disk(lv1, lf1, w)
+            if kind not in ("failed", "skip", "disk"):
+                variants.append((kind, lv1[orig2], lf2, uniq1[orig2], n_cut))
+        if not variants:
+            variants.append(("failed", lv1, lf1, uniq1))
+
+    def run(lv, lf):
+        if fast and method in ("auto", "arap"):
+            best = _flatten(lv, lf, "lscm", 0)
+            if best[4] == 0 and best[5] <= OVERLAP_TOL:
+                return best
+        return _flatten(lv, lf, method, arap_iters)
+
+    chosen = None
+    for v in variants:
+        kind, lv, lf, uniq = v[:4]
+        res = run(lv, lf)
+        if chosen is None:
+            chosen = (v, res)
+            continue
+        (_, pres) = chosen
+        pf, ps = _score(pres)
+        cf, cs = _score(res)
+        # prefer the uncut layout unless the cut one is clearly better
+        if cf < pf or (cf == pf and cs < 0.9 * ps) or chosen[0][0] == "failed":
+            chosen = (v, res)
+
+    v, (name, uv, ad, ar, fl, ov) = chosen
+    kind, lv, lf, uniq = v[:4]
+    info.update(method=name, angle_d=float(ad), area_d=float(ar), flips=int(fl), overlap=float(ov),
+                cut=kind, cut_edges=int(v[4]) if len(v) > 4 else 0)
     return uv, uniq, lf, info

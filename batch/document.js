@@ -328,6 +328,26 @@ export function createStageDefaultInputs(workflow) {
 // With nothing that far back it settles for the earliest stage there is, and a
 // first stage never hands two file inputs the same variable while another of
 // that type is declared — baking a mesh onto itself is never the intent.
+//
+// Reaching back counts SHAPES, not stages: a stage that moves no vertex (Auto
+// UV, `keepsSurface`) is the same shape as the stage it came from. So in
+// generate -> optimize -> auto UV -> bake the low poly is the unwrapped mesh and
+// the high poly is the generated one — not the optimized mesh, which is only
+// the low poly without its UVs.
+function keepsSurface(stage) {
+  return Boolean(isBuiltInBatchAction(getStageAction(stage)) && getBatchActionDescriptor(getStageAction(stage))?.keepsSurface)
+}
+
+function findUpstreamStage(stages, stageIndex, offset) {
+  if (stageIndex <= 0) return null
+  let index = stageIndex - 1
+  for (let step = 1; step < offset && index > 0; step += 1) {
+    while (index > 0 && keepsSurface(stages[index])) index -= 1
+    if (index > 0) index -= 1
+  }
+  return stages[index] || null
+}
+
 export function createStageDefaultBindings(workflow, stages, stageIndex, variables = []) {
   const bindings = {}
   const usedVariables = new Set()
@@ -338,7 +358,7 @@ export function createStageDefaultBindings(workflow, stages, stageIndex, variabl
       continue
     }
     const offset = Math.max(1, Number(parameter.defaultUpstreamOffset) || 1)
-    const upstream = stageIndex > 0 ? stages[Math.max(0, stageIndex - offset)] : null
+    const upstream = findUpstreamStage(stages, stageIndex, offset)
     if (upstream) {
       bindings[parameter.id] = { source: BINDING_STAGE, stageId: upstream.id }
       continue

@@ -1,8 +1,8 @@
 // Batch stage ACTIONS — what a stage runs.
 //
 // A stage used to be a ComfyUI workflow and nothing else. It is now an action:
-// a ComfyUI workflow, or one of the Mesh Editor's own tools (Optimize, Auto Rig,
-// Bake), which run in the backend without ComfyUI.
+// a ComfyUI workflow, or one of the Mesh Editor's own tools (Optimize, Auto UV,
+// Auto Rig, Bake), which run in the backend without ComfyUI.
 //
 // Every built-in action DESCRIBES ITSELF AS A WORKFLOW — `parameters` with a
 // valueType and a default, `outputs` with a valueType. That is the whole trick:
@@ -17,20 +17,24 @@
 // The Node-side execution lives in actionRunner.js.
 //
 // The defaults mirror the Mesh Editor panels (DEFAULT_SIMPLIFY_OPTIONS,
-// DEFAULT_AUTO_RIG_OPTIONS and DEFAULT_BAKE_OPTIONS in src/utils/meshTools.js),
-// which cannot be imported here because that module is browser code.
+// DEFAULT_AUTO_UV_OPTIONS, DEFAULT_AUTO_RIG_OPTIONS and DEFAULT_BAKE_OPTIONS in
+// src/utils/meshTools.js), which cannot be imported here because that module is
+// browser code. The Auto UV list also mirrors AutoUvOptions in
+// python-server/app/schemas.py: a field added there needs adding here.
 
 export const BATCH_ACTION_COMFYUI = 'comfyui'
 export const BATCH_ACTION_OPTIMIZE = 'optimize'
+export const BATCH_ACTION_AUTOUV = 'autouv'
 export const BATCH_ACTION_AUTORIG = 'autorig'
 export const BATCH_ACTION_BAKE = 'bake'
 
 // Picker order.
-export const BATCH_ACTIONS = [BATCH_ACTION_COMFYUI, BATCH_ACTION_OPTIMIZE, BATCH_ACTION_AUTORIG, BATCH_ACTION_BAKE]
+export const BATCH_ACTIONS = [BATCH_ACTION_COMFYUI, BATCH_ACTION_OPTIMIZE, BATCH_ACTION_AUTOUV, BATCH_ACTION_AUTORIG, BATCH_ACTION_BAKE]
 
 export const BATCH_ACTION_LABELS = {
   [BATCH_ACTION_COMFYUI]: 'ComfyUI Workflow',
   [BATCH_ACTION_OPTIMIZE]: 'Optimize',
+  [BATCH_ACTION_AUTOUV]: 'Auto UV',
   [BATCH_ACTION_AUTORIG]: 'Auto Rig',
   [BATCH_ACTION_BAKE]: 'Bake'
 }
@@ -60,7 +64,10 @@ const AUTO_RIG_BONE_NAMES = [
 
 // Descriptor fields beyond the workflow shape: `action`, `kanbanColumn` (where the
 // result card lands), `desktopService` (which on-demand service the desktop app
-// has to start first) and `parentParameterId` (see findParentAssetForStage).
+// has to start first — see getStageDesktopServices for the conditional one),
+// `parentParameterId` (see findParentAssetForStage) and `keepsSurface` (the
+// action moves no vertex, so a Bake's default high poly looks past it — see
+// createStageDefaultBindings).
 
 // Parameter helpers. `label` is the hint line under the field, `name` the
 // field's title — the same split a ComfyUI workflow parameter uses.
@@ -77,6 +84,10 @@ const choice = (id, name, defaultValue, label, options) => ({
   enums: options.map(option => option.value),
   options
 })
+
+// Optimize's switch for re-unwrapping a result whose seams the aggressive pass
+// broke. Named here because the runner and the service check read it too.
+export const OPTIMIZE_REUNWRAP_PARAMETER = 'auto_uv_if_broken'
 
 // The map checkboxes of the Bake panel, one boolean each so a group can switch
 // a pass on or off through a variable like any other value.
@@ -116,7 +127,60 @@ const ACTION_DESCRIPTORS = {
       toggle('permissive', 'Permissive collapses', false,
         'gltfpack -sp. Only applies when seams may break; measured as a no-op on every mesh tested.'),
       toggle('aggressive', 'Aggressive pass (last resort)', true,
-        'gltfpack -sa. Only applies when seams may break: reaches the target by rebuilding the vertex set, so hard edges smooth over and the texture scrambles.')
+        'gltfpack -sa. Only applies when seams may break: reaches the target by rebuilding the vertex set, so hard edges smooth over and the texture scrambles.'),
+      toggle(OPTIMIZE_REUNWRAP_PARAMETER, 'Re-unwrap UVs if seams break', true,
+        'When the aggressive pass actually ran, give the result fresh UVs with Auto UV (default settings) so a later Bake has a clean layout to bake onto. The old texture no longer applies either way — bake the base colour from the source to bring it back. Needs the Mesh Tools service, and drops a rig: rig after this stage, not before.')
+    ]
+  },
+
+  [BATCH_ACTION_AUTOUV]: {
+    id: `action:${BATCH_ACTION_AUTOUV}`,
+    action: BATCH_ACTION_AUTOUV,
+    name: 'Auto UV',
+    description: 'Unwraps new UVs with the Mesh Tools service, exactly as the Mesh Editor’s Auto UV does. Use it before a Bake when the mesh has no UVs or broken ones — a ComfyUI mesh without UVs, or an Optimize whose aggressive pass scrambled them. The result carries a plain material (the old texture no longer fits the new layout) and no rig, so bake after it and rig after that. Saved as a new version of the input mesh.',
+    kanbanColumn: 'Mesh Edit',
+    desktopService: 'meshtools',
+    parentParameterId: 'mesh',
+    keepsSurface: true,
+    outputs: [{ name: 'Mesh', valueType: 'mesh' }],
+    parameters: [
+      mesh('mesh', 'Mesh', 'The mesh to unwrap'),
+      // Segmentation
+      number('max_cone_deg', 'Normal-cone cap (°)', 50, 'Higher = fewer, more distorted charts', { min: 1, max: 180, step: 1 }),
+      number('sharp_weight', 'Sharp-edge weight', 0.35, 'How strongly sharp edges attract seams', { min: 0, max: 1, step: 0.01 }),
+      number('fold_cap_deg', 'Fold cap (°)', 88, 'Dihedral fold angle that forces a seam', { min: 1, max: 180, step: 1 }),
+      number('min_faces', 'Min faces / chart', 20, 'Charts smaller than this are dissolved into neighbours', { min: 1, max: 100000, step: 1 }),
+      number('min_area_frac', 'Min area fraction', 0.004, 'Min chart area as a fraction of total surface area', { min: 0, max: 1, step: 0.001 }),
+      // Refinement
+      toggle('refine', 'Validated merge pass', true, 'LSCM-validated chart merge (off = faster, more charts)'),
+      number('refine_target_faces', 'Merge below faces', 80, 'Charts below this face count are merge candidates', { min: 1, max: 100000, step: 1 }),
+      number('refine_ad_thresh', 'Merge distortion cap', 1.32, 'Max angle-distortion ratio a merge may introduce', { min: 1, max: 10, step: 0.01 }),
+      // Seam placement
+      toggle('hide_seams', 'Hide seams', true, 'Price seams by visibility (occlusion + concavity) so they move into creases and hidden places'),
+      number('hide_strength', 'Hide strength', 1, 'How much more a seam costs on open surface than in a hidden crease', { min: 0, max: 4, step: 0.1 }),
+      toggle('refine_borders', 'Move borders to creases', true, 'Re-route every chart border along the cheapest nearby path: shorter, straighter, on sharp or hidden edges'),
+      number('border_rings', 'Border reach (rings)', 4, 'How many face rings either side of a border it may move', { min: 1, max: 16, step: 1 }),
+      // Parameterization
+      choice('method', 'Method', 'auto', 'Per-chart flattening method', [
+        { value: 'auto', label: 'Auto' },
+        { value: 'lscm', label: 'LSCM' },
+        { value: 'arap', label: 'ARAP' },
+        { value: 'planar', label: 'Planar' }
+      ]),
+      number('arap_iters', 'ARAP iterations', 4, '0 disables ARAP (LSCM/planar only)', { min: 0, max: 100, step: 1 }),
+      toggle('ensure_disks', 'Cut non-disk charts', true, 'Open tubes, closed shells and handled charts with the cheapest cut so they flatten without folding'),
+      // Packing
+      {
+        ...number('resolution', 'Atlas resolution', 1024, 'Sizes the padding between islands — set it to the resolution the Bake will use, or islands bleed into each other at that size.'),
+        enums: [256, 512, 1024, 2048, 4096, 8192]
+      },
+      number('padding_texels', 'Padding (texels)', 4, 'Inter-island padding at the atlas resolution', { min: 0, max: 64, step: 1 }),
+      // Topology repair
+      toggle('weld', 'Proximity weld', true, 'Weld coincident verts before unwrapping (stitches shattered shells)'),
+      number('weld_tol_frac', 'Weld tolerance', 0.1, 'As a fraction of median edge length', { min: 0, max: 1, step: 0.01 }),
+      // Shading
+      toggle('preserve_normals', 'Preserve normals', true, 'Carry the mesh’s own vertex normals through the unwrap, so shading is unchanged'),
+      number('normal_smooth_deg', 'Smoothing angle (°)', 180, 'Used when normals are rebuilt (none in the file, or Preserve off): edges sharper than this stay hard. 180 = fully smooth', { min: 0, max: 180, step: 1 })
     ]
   },
 
@@ -191,6 +255,50 @@ const ACTION_DESCRIPTORS = {
 
 export function getBatchActionDescriptor(action) {
   return ACTION_DESCRIPTORS[normalizeBatchAction(action)] || null
+}
+
+// The Auto UV options a descriptor's parameters stand for, as the service's
+// AutoUvOptions reads them. Resolved inputs in, the options object out; an
+// input that is absent falls back to the descriptor's default, which is how
+// Optimize's re-unwrap runs Auto UV at its defaults.
+export function getAutoUvActionOptions(inputs = {}) {
+  const options = {}
+  for (const parameter of ACTION_DESCRIPTORS[BATCH_ACTION_AUTOUV].parameters) {
+    if (parameter.valueType === 'mesh') continue
+    const value = inputs[parameter.id]
+    if (parameter.valueType === 'boolean') {
+      options[parameter.id] = value === undefined ? parameter.defaultValue : value === true
+    } else if (parameter.valueType === 'number') {
+      const number = Number(value)
+      options[parameter.id] = value === undefined || value === '' || !Number.isFinite(number) ? parameter.defaultValue : number
+    } else {
+      options[parameter.id] = value === undefined || value === '' ? parameter.defaultValue : String(value)
+    }
+  }
+  return options
+}
+
+// Could this boolean be on in some group? A manual value says so outright; a
+// variable binding cannot be known until a group is picked, so it counts.
+function mightBeOn(stage, parameterId) {
+  if (stage?.bindings?.[parameterId]?.source === 'variable') return true
+  return stage?.inputs?.[parameterId] === true
+}
+
+// The on-demand desktop services a stage needs started before the run. Usually
+// the descriptor's own; Optimize needs Mesh Tools only when its re-unwrap could
+// actually fire, which takes all three of the switches that lead to it.
+export function getStageDesktopServices(stage) {
+  const action = normalizeBatchAction(stage?.action)
+  const descriptor = getBatchActionDescriptor(action)
+  const services = descriptor?.desktopService ? [descriptor.desktopService] : []
+  if (action === BATCH_ACTION_OPTIMIZE
+    && mightBeOn(stage, 'allow_seam_breaking')
+    && mightBeOn(stage, 'aggressive')
+    && mightBeOn(stage, OPTIMIZE_REUNWRAP_PARAMETER)) {
+    services.push('meshtools')
+  }
+  return services
 }
 
 // The glTF material slots a bake can fill. A lone roughness or metallic map has

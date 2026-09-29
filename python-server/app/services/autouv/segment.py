@@ -247,6 +247,10 @@ def refine_merge(
     union_cap: int = 4000,
     max_passes: int = 6,
     progress=None,
+    method: str = "auto",
+    arap_iters: int = 4,
+    vertex_weight=None,
+    make_disk: bool = True,
 ) -> np.ndarray:
     """Merge adjacent charts validated by the *actual* flattening.
 
@@ -254,10 +258,11 @@ def refine_merge(
     distortion locally but, on a noisy organic mesh, leaves a long tail of small
     charts that *could* in fact be flattened together without overlap. This
     pass repeatedly tries to merge each small chart into a neighbour, accepting
-    the merge only when the union actually parameterises **flip-free** and below
-    a distortion threshold. It optimises the true objective (no UV overlaps, low
-    distortion, few charts) instead of the proxy, and is the main reason the
-    final atlas has a handful of large islands rather than hundreds of slivers.
+    the merge only when the union actually parameterises **flip-free**, without
+    folding over itself, and below a distortion threshold. It optimises the true
+    objective (no UV overlaps, low distortion, few charts) instead of the proxy,
+    and is the main reason the final atlas has a handful of large islands
+    rather than hundreds of slivers.
 
     ``target_faces`` is the size below which a chart is considered "small" and
     worth trying to absorb. Larger -> fewer, larger islands (slower).
@@ -276,7 +281,11 @@ def refine_merge(
         if cached is not None:
             return cached
         fid = np.asarray(faces_tuple, dtype=np.int64)
-        uv, _, lf, info = _param.parameterize_chart(V, Fc, fid)
+        # LSCM alone decides almost every merge; the full best-of search only
+        # runs when LSCM folds. This is the hot loop of the whole unwrap.
+        uv, _, lf, info = _param.parameterize_chart(
+            V, Fc, fid, method=method, arap_iters=arap_iters,
+            vertex_weight=vertex_weight, make_disk=make_disk, fast=True)
         # compactness = how much of the UV bounding box the island actually
         # fills. Spindly / branchy islands (low pack-fill) waste atlas space and
         # look ugly, so we track it and refuse merges that create them.
@@ -286,7 +295,9 @@ def refine_merge(
         e1 = uv[lf[:, 2]] - uv[lf[:, 0]]
         uv_area = 0.5 * float(np.abs(e0[:, 0] * e1[:, 1] - e0[:, 1] * e1[:, 0]).sum())
         packfill = uv_area / bbox if bbox > 1e-12 else 0.0
-        cache[faces_tuple] = (info["flips"], info["angle_d"], packfill)
+        # a flip-free union can still fold over itself; count that as a flip
+        flips = info["flips"] + (1 if info["overlap"] > _param.OVERLAP_TOL else 0)
+        cache[faces_tuple] = (flips, info["angle_d"], packfill)
         return cache[faces_tuple]
 
     for _pass in range(max_passes):

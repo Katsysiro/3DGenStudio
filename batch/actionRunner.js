@@ -1,4 +1,4 @@
-// Running a built-in batch action (Optimize / Auto Rig / Bake) for one cell.
+// Running a built-in batch action (Optimize / Auto UV / Auto Rig / Bake) for one cell.
 //
 // NODE ONLY — unlike actions.js and document.js, which the page imports too.
 // Shared by the backend batch loop (runner.js) and the MCP run_batch tool, which
@@ -17,9 +17,12 @@ import { findProjectAsset } from '../mcp/client.js';
 import { parseGlb, serializeGlb } from '../meshPivot.js';
 import {
   BATCH_ACTION_AUTORIG,
+  BATCH_ACTION_AUTOUV,
   BATCH_ACTION_BAKE,
   BATCH_ACTION_OPTIMIZE,
+  OPTIMIZE_REUNWRAP_PARAMETER,
   describeBakeMapProblem,
+  getAutoUvActionOptions,
   getBakeActionMaps,
   getBatchActionDescriptor
 } from './actions.js';
@@ -27,6 +30,12 @@ import {
 // Below this the bake reached too little of the UV layout to be what was meant —
 // the same line the Mesh Editor draws (BAKE_COVERAGE_COMPLETE).
 const BAKE_COVERAGE_WARNING = 0.95;
+
+// Share of the used texture area painted by more than one triangle. Those texels
+// hold one triangle's bake and show it on the other, so a layout past this is
+// worth saying out loud before anyone bakes onto it. A flip count cannot see
+// this — the 2-3.5% overlaps the Auto UV overhaul found all had zero flips.
+const UV_OVERLAP_WARNING = 0.01;
 
 function meshBlob(buffer) {
   return new Blob([buffer], { type: 'model/gltf-binary' });
@@ -78,15 +87,61 @@ async function saveMeshVersion(api, target, buffer, name) {
   return api.apiForm('POST', '/meshes/editor/save', form);
 }
 
-// Maps a mesh-tool SSE frame onto the cell's 0-100 progress.
-function progressFrom(onProgress) {
+// Maps a mesh-tool SSE frame onto the cell's 0-100 progress — the whole cell by
+// default, or the slice [from, to] of it when the tool is one step of several.
+function progressFrom(onProgress, from = 0, to = 95) {
   return evt => {
     const frac = Number(evt?.frac);
-    if (Number.isFinite(frac)) onProgress?.(Math.round(Math.min(1, Math.max(0, frac)) * 95), evt?.message || evt?.stage || '');
+    if (Number.isFinite(frac)) onProgress?.(Math.round(from + Math.min(1, Math.max(0, frac)) * (to - from)), evt?.message || evt?.stage || '');
   };
 }
 
-// --- the three actions -----------------------------------------------------
+function glbHasSkin(buffer) {
+  try {
+    return (parseGlb(buffer).json.skins || []).length > 0;
+  } catch {
+    return false;
+  }
+}
+
+// One Auto UV pass over a GLB. Shared by the Auto UV action and by Optimize's
+// re-unwrap, so the two cannot drift apart on what they send or what they warn.
+async function unwrapUvs(api, buffer, fileName, options, onProgress) {
+  const form = new FormData();
+  form.append('meshFile', meshBlob(buffer), fileName);
+  form.append('format', 'glb');
+  form.append('options', JSON.stringify(options));
+  const done = await api.apiFormSse('/meshes/auto-uv', form, onProgress);
+  if (!done.mesh_b64) throw new Error('The Auto UV service returned no mesh');
+  const tool = done.stats?.tool || {};
+
+  const warnings = [];
+  if (typeof tool.overlap_share === 'number' && tool.overlap_share > UV_OVERLAP_WARNING) {
+    warnings.push(`${(tool.overlap_share * 100).toFixed(1)}% of the UV layout is covered by more than one triangle — a bake will show the wrong detail there`);
+  }
+  if (Number(tool.flipped_triangles) > 0) {
+    warnings.push(`${tool.flipped_triangles} triangles are mirrored in UV space`);
+  }
+  // The service rebuilds the mesh from its vertices and faces, so a skin does
+  // not survive the trip. Said here rather than refused: an unwrap before a
+  // bake is the point, and the rig belongs after both.
+  if (glbHasSkin(buffer)) {
+    warnings.push('The rig was dropped — Auto UV returns geometry only, so run Auto Rig after this stage');
+  }
+
+  return {
+    buffer: Buffer.from(done.mesh_b64, 'base64'),
+    stats: {
+      charts: tool.n_charts ?? null,
+      fill: tool.fill_ratio ?? null,
+      overlap: tool.overlap_share ?? null,
+      flipped: tool.flipped_triangles ?? null
+    },
+    warnings
+  };
+}
+
+// --- the actions -----------------------------------------------------------
 
 async function runOptimize(api, { projectId, inputs, onProgress }) {
   const source = await loadMeshInput(api, projectId, inputs.mesh, 'Mesh');
@@ -106,26 +161,48 @@ async function runOptimize(api, { projectId, inputs, onProgress }) {
   }));
   const done = await api.apiForm('POST', '/meshes/optimize', form);
   const stats = done.stats || {};
+  let buffer = Buffer.from(done.mesh_b64, 'base64');
 
   const warnings = [];
   if (stats.seam_limited) {
     warnings.push(`Stopped at ${Number(stats.triangles).toLocaleString('en-US')} faces, short of ${Number(inputs.target_faces).toLocaleString('en-US')} — raise the error budget, or allow seams to break`);
   }
-  if (stats.seams_broken) {
-    warnings.push('Attribute seams were welded to reach the target — check the texture and the hard edges');
+
+  // `seams_broken` means the aggressive pass (-sa) really ran: it rebuilt the
+  // vertex set and reassigned UVs, which is exactly what a later Bake cannot
+  // work with. This is the only place that knows it happened, which is why the
+  // re-unwrap lives here and not only as a stage of its own.
+  let uv = null;
+  if (stats.seams_broken && inputs[OPTIMIZE_REUNWRAP_PARAMETER] === true) {
+    onProgress?.(40, 'Re-unwrapping UVs');
+    const unwrapped = await unwrapUvs(api, buffer, source.fileName, getAutoUvActionOptions({}), progressFrom(onProgress, 40, 95));
+    buffer = unwrapped.buffer;
+    uv = unwrapped.stats;
+    warnings.push(`The aggressive pass broke the UV seams, so the result was re-unwrapped (${uv.charts ?? '?'} islands). The old texture no longer fits it — bake the base colour from the source to bring it back`);
+    warnings.push(...unwrapped.warnings);
+  } else if (stats.seams_broken) {
+    warnings.push('The aggressive pass welded attribute seams to reach the target, so the UVs and hard edges are broken — turn on "Re-unwrap UVs if seams break", or add an Auto UV stage, before baking');
   }
 
   return {
     source,
-    buffer: Buffer.from(done.mesh_b64, 'base64'),
+    buffer,
     stats: {
       inputFaces: stats.input_triangles ?? null,
       faces: stats.triangles ?? null,
       targetFaces: stats.target_faces ?? null,
-      achievedRatio: stats.achieved_ratio ?? null
+      achievedRatio: stats.achieved_ratio ?? null,
+      ...(uv ? { uv } : {})
     },
     warnings
   };
+}
+
+async function runAutoUv(api, { projectId, inputs, onProgress }) {
+  const source = await loadMeshInput(api, projectId, inputs.mesh, 'Mesh');
+  onProgress?.(5, 'Unwrapping');
+  const unwrapped = await unwrapUvs(api, source.buffer, source.fileName, getAutoUvActionOptions(inputs), progressFrom(onProgress, 5, 95));
+  return { source, buffer: unwrapped.buffer, stats: unwrapped.stats, warnings: unwrapped.warnings };
 }
 
 async function runAutoRig(api, { projectId, inputs, onProgress }) {
@@ -210,6 +287,7 @@ async function runBake(api, { projectId, inputs, onProgress }) {
 
 const RUNNERS = {
   [BATCH_ACTION_OPTIMIZE]: runOptimize,
+  [BATCH_ACTION_AUTOUV]: runAutoUv,
   [BATCH_ACTION_AUTORIG]: runAutoRig,
   [BATCH_ACTION_BAKE]: runBake
 };
