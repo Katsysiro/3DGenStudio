@@ -631,6 +631,8 @@ const BAKE_SCALE_TOLERANCE = 0.05
 const BAKE_UNIFORM_TOLERANCE = 0.02
 const BAKE_MIN_AXIS_FRAC = 0.01
 const BAKE_MIN_SCALE_DELTA = 0.005
+// How far short of the agreeing pair's factor one trimmed axis may fall.
+const BAKE_TRIM_MAX = 0.35
 
 // The single factor that takes `sourceSize` to `targetSize`, or null when the
 // three axes disagree about what it is. Disagreement is the answer, not a
@@ -645,8 +647,28 @@ function uniformScaleRatio(targetSize, sourceSize, diagonal) {
   if (ratios.length < 2) return null
   const mean = ratios.reduce((sum, r) => sum + r, 0) / ratios.length
   if (!(mean > 0)) return null
-  if (ratios.some(r => Math.abs(r - mean) > BAKE_UNIFORM_TOLERANCE * mean)) return null
+  if (ratios.some(r => Math.abs(r - mean) > BAKE_UNIFORM_TOLERANCE * mean)) {
+    return trimmedScaleRatio(targetSize, sourceSize, floor)
+  }
   return Math.abs(mean - 1) <= BAKE_MIN_SCALE_DELTA ? null : mean
+}
+
+// The fallback for a low-poly that lost a spike (a chimney, a horn tip): two axes
+// agree on the factor and the third comes up SHORT on the target, because
+// simplification removes and never adds. Mirrors trimmed_scale_ratio /
+// ALIGN_TRIM_MAX in bake_worker.py. Needs all three axes — with one too thin to
+// divide by there is no majority to name the odd one out.
+function trimmedScaleRatio(targetSize, sourceSize, floor) {
+  const axes = ['x', 'y', 'z']
+  if (axes.some(axis => targetSize[axis] <= floor || sourceSize[axis] <= floor)) return null
+  const ratios = axes.map(axis => targetSize[axis] / sourceSize[axis])
+  const top = Math.max(...ratios)
+  const agreeing = ratios.filter(r => top - r <= BAKE_UNIFORM_TOLERANCE * top)
+  if (agreeing.length !== 2) return null
+  const ratio = (agreeing[0] + agreeing[1]) / 2
+  const trimmed = ratios.find(r => top - r > BAKE_UNIFORM_TOLERANCE * top)
+  if (trimmed < (1 - BAKE_TRIM_MAX) * ratio) return null
+  return Math.abs(ratio - 1) <= BAKE_MIN_SCALE_DELTA ? null : ratio
 }
 
 // Will this high-poly source actually reach the mesh we want to bake onto?

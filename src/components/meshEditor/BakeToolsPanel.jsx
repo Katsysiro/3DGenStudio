@@ -159,6 +159,17 @@ export default function BakeToolsPanel({
             </span>
           )}
 
+          {result.stats?.alignment?.anchors && (
+            <span className="mesh-editor-panel__hint">
+              {Object.entries(result.stats.alignment.anchors).map(([axis, end]) => (
+                axis === 'height' ? `The source's ${end === 'min' ? 'bottom' : 'top'}` : `One end of the source's ${axis}`
+              )).join(' and ')}{' '}
+              was lined up with this mesh rather than its centre — this mesh is shorter there, because
+              simplifying it dropped something that stuck out (a chimney, a tip), and centring would have
+              left the rest of that side off the surface.
+            </span>
+          )}
+
           {result.stats?.alignment?.mode === 'skipped-scale' && (
             <span className="mesh-editor-panel__hint" style={{ color: '#e0a030' }}>
               The source is a different size from this mesh
@@ -244,10 +255,10 @@ export default function BakeToolsPanel({
         <span className="mesh-editor-panel__section-title">Alignment</span>
         <ToggleField label="Align source to mesh" value={o.align_source !== false}
           onChange={v => setOption('align_source', v)} disabled={fieldsDisabled}
-          hint="A bake casts rays from this mesh onto the source, so the two must occupy the same space. Moving the pivot after picking a source separates them, and the bake then comes back blank where they no longer overlap. This re-centres a source that is the same size as the mesh, and rescales one that differs by a single factor on all three axes — the case you get when the low-poly was simplified outside the editor. A source whose axes disagree about the factor is a different object and is never moved." />
+          hint="A bake casts rays from this mesh onto the source, so the two must occupy the same space. Moving the pivot after picking a source separates them, and the bake then comes back blank where they no longer overlap. This re-centres a source that is the same size as the mesh, and rescales one that differs by a single factor — the case you get when the low-poly was simplified outside the editor — even when one axis came up short because the simplification dropped a spike. Each placement is checked against how much of this mesh's surface it brings the source onto, and the source is only moved when that improves. A source whose axes disagree about the factor any other way is a different object and is never moved." />
         <ToggleField label="Refuse a source that does not overlap" value={(o.require_overlap ?? 0.5) > 0}
           onChange={v => setOption('require_overlap', v ? 0.5 : 0)} disabled={fieldsDisabled}
-          hint="Stops in seconds rather than spending minutes of ray casting to return blank maps. Turn off to bake a source that only covers part of the mesh on purpose." />
+          hint="Refuses when, after alignment, less than half of this mesh's surface has the source within reach (twice the cage extrusion). Stops in seconds rather than spending minutes of ray casting to return blank maps. Turn off to bake a source that only covers part of the mesh on purpose." />
       </div>
 
       <div className="mesh-editor-panel__notes">

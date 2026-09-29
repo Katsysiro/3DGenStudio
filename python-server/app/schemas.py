@@ -226,16 +226,20 @@ class BakeOptions(BaseModel):
                                            "wherever the two stop overlapping — and moving a pivot between "
                                            "picking the source and baking is enough to cause it. Re-centres a "
                                            "source that is the same size, and rescales one whose box is the "
-                                           "target's times the SAME factor on all three axes (a mesh "
-                                           "simplified outside the editor against a texturing pass that "
-                                           "normalised its output). A source whose axes disagree about that "
-                                           "factor is a different object and is never moved; that case is "
-                                           "reported in stats.alignment instead.")
+                                           "target's times the SAME factor (a mesh simplified outside the "
+                                           "editor against a texturing pass that normalised its output), "
+                                           "even with one axis trimmed short by the simplification. Each "
+                                           "placement is scored by how much of the target's surface it "
+                                           "reaches, and the source only moves when that improves. A source "
+                                           "whose axes disagree about the factor any other way is a different "
+                                           "object and is never moved; that case is reported in "
+                                           "stats.alignment instead.")
     require_overlap: float = Field(default=0.5, ge=0.0, le=1.0,
-                                   description="Refuse the bake when, after alignment, the source covers less "
-                                               "than this fraction of the target's smallest axis. Fails in "
-                                               "seconds instead of spending minutes of ray casting to return "
-                                               "blank maps. 0 disables the check.")
+                                   description="Refuse the bake when, after alignment, less than this "
+                                               "fraction of the target's surface has the source within reach "
+                                               "(twice the cage extrusion). Fails in seconds instead of "
+                                               "spending minutes of ray casting to return blank maps. 0 "
+                                               "disables the check.")
 
 
 class FlattenOptions(BaseModel):

@@ -109,6 +109,29 @@ ALIGN_UNIFORM_TOLERANCE = 0.02
 ALIGN_MIN_AXIS_FRAC = 0.01  # axes thinner than this fraction of the diagonal give no ratio
 ALIGN_MIN_SCALE_DELTA = 0.005  # ratios this close to 1 are the same scale, not a rescale
 ALIGN_MIN_OFFSET_FRAC = 0.001  # offsets below this fraction of the diagonal are noise
+# Simplification does not only shave a hair off every extremity — it can drop a
+# whole spike (a chimney, a finial, a horn tip), and the axis it stood on then
+# comes up several percent SHORT on the low-poly while the other two still agree
+# to a fraction of a percent. Assets 5902/7512 (a Trellis2-normalised house and
+# its ComfyUI simplification) were exactly that: X and Z said 1.982x, Y said
+# 1.812x because the low-poly had lost 4cm of roof, and the strict test above
+# refused the rescale and baked a half-size source in place (23% coverage). An
+# axis may therefore trail the agreeing pair by up to this share of its extent —
+# only ever SHORT, since simplification removes and never adds.
+ALIGN_TRIM_MAX = 0.35
+# An axis whose rescaled extents still differ by more than this fraction of the
+# diagonal is lined up by each end as well as by its centre, and the placement
+# that lands the target's surface closest to the source wins. Centre-to-centre is
+# only right when both ends were shaved alike; a lost spike moves one end only.
+ALIGN_TRIM_ANCHOR_FRAC = 0.005
+# Points sampled (area-weighted) on the target surface to measure how much of it
+# the source reaches. Enough to resolve a percent; few enough that ranking a
+# dozen candidate placements stays well under a second.
+ALIGN_REACH_SAMPLES = 1024
+# A sample counts as reached when the source surface lies within this multiple of
+# the cage extrusion. The bake's rays start one cage out and travel inward, so
+# detail up to about a cage either side of the target is what they can find.
+ALIGN_REACH_FACTOR = 2.0
 
 
 def emit(stage: str, frac: float, message: str = "") -> None:
@@ -324,22 +347,134 @@ def uniform_scale_ratio(t_extent, s_extent, diagonal) -> float | None:
     return mean
 
 
-def align_source(low, high_objects) -> dict:
+def trimmed_scale_ratio(t_extent, s_extent, diagonal) -> tuple[float, list] | None:
+    """The uniform factor when two axes agree and the third is merely TRIMMED.
+
+    The fallback for uniform_scale_ratio's refusal, for a low-poly that lost a
+    spike (see ALIGN_TRIM_MAX). Takes the agreeing pair's factor and returns it
+    with the axes that fell short of it. Needs all three axes: with a flat axis
+    out of the running there is no majority to say which of the other two is the
+    odd one out. The odd axis must be the SHORTER one on the target — a target
+    that sticks out further than the rescaled source has something the source
+    lacks, which is a different object, not a simplification.
+    """
+    floor = ALIGN_MIN_AXIS_FRAC * max(diagonal, 1e-9)
+    if any(t_extent[axis] <= floor or s_extent[axis] <= floor for axis in range(3)):
+        return None
+    ratios = [t_extent[axis] / s_extent[axis] for axis in range(3)]
+    top = max(ratios)
+    agreeing = [axis for axis in range(3) if top - ratios[axis] <= ALIGN_UNIFORM_TOLERANCE * top]
+    if len(agreeing) != 2:
+        return None
+    ratio = sum(ratios[axis] for axis in agreeing) / len(agreeing)
+    trimmed = [axis for axis in range(3) if axis not in agreeing]
+    if any(ratios[axis] < (1.0 - ALIGN_TRIM_MAX) * ratio for axis in trimmed):
+        return None
+    return ratio, trimmed
+
+
+def surface_samples(obj, count: int) -> list:
+    """Area-weighted world-space points on `obj`'s surface, deterministic.
+
+    Area-weighted because the question they answer is how much of the UV layout a
+    bake can fill, and texels follow area, not vertex density — a low-poly's
+    vertices crowd into its detailed corners and would over-report those.
+    """
+    import random
+    from mathutils import Vector
+
+    mesh = obj.data
+    mesh.calc_loop_triangles()
+    matrix = obj.matrix_world
+    verts = [matrix @ v.co for v in mesh.vertices]
+    tris = [tuple(verts[i] for i in tri.vertices) for tri in mesh.loop_triangles]
+    areas = [((b - a).cross(c - a)).length for a, b, c in tris]
+    if not tris or sum(areas) <= 0:
+        return []
+    rng = random.Random(0)
+    points = []
+    for index in rng.choices(range(len(tris)), weights=areas, k=count):
+        a, b, c = tris[index]
+        u, v = rng.random(), rng.random()
+        if u + v > 1.0:
+            u, v = 1.0 - u, 1.0 - v
+        points.append(Vector(a + (b - a) * u + (c - a) * v))
+    return points
+
+
+class SourceSurface:
+    """Nearest-point queries against the high-poly, in world space.
+
+    One BVH per object in its own local space (FromObject builds it there), with
+    the query taken in through the inverse world matrix and the hit brought back
+    out, so a parented or scaled import is measured where it really renders.
+    """
+
+    def __init__(self, high_objects):
+        import bpy
+        from mathutils.bvhtree import BVHTree
+
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        self.trees = []
+        for obj in high_objects:
+            evaluated = obj.evaluated_get(depsgraph)
+            tree = BVHTree.FromObject(evaluated, depsgraph)
+            self.trees.append((tree, obj.matrix_world.copy(), obj.matrix_world.inverted()))
+
+    def distance(self, point) -> float:
+        best = float("inf")
+        for tree, matrix, inverse in self.trees:
+            hit = tree.find_nearest(inverse @ point)
+            if hit[0] is not None:
+                best = min(best, (matrix @ hit[0] - point).length)
+        return best
+
+
+def measure_reach(samples, surface, scale: float, translation, reach: float) -> dict:
+    """How much of the target the source reaches with the source moved by (scale, translation).
+
+    The source is never moved to ask: each target sample goes through the inverse
+    of the placement into the source's current space instead, and the distance
+    found there comes back out multiplied by the scale. Ranking a dozen candidate
+    placements this way costs queries, not a dozen BVH rebuilds.
+    """
+    if not samples:
+        return {"reach": 1.0, "median": 0.0}
+    distances = sorted(
+        surface.distance((point - translation) / scale) * scale for point in samples
+    )
+    return {
+        "reach": sum(1 for d in distances if d <= reach) / len(distances),
+        "median": distances[len(distances) // 2],
+    }
+
+
+AXIS_NAMES = ("width", "depth", "height")  # Blender X / Y / Z; a glTF's up axis imports as Z
+
+
+def align_source(low, high_objects, samples, surface, reach: float) -> dict:
     """Put the high-poly into the low-poly's space when the two are the same object.
 
     Returns a report dict (always), having transformed `high_objects` in place when
-    it decided to. Centre-to-centre is the estimator rather than min-to-min: the
-    low-poly is normally a simplification of the high-poly, and simplification
-    shaves the extremities at BOTH ends, so the centres stay put where either end
-    of the box drifts. The residual after re-centring is a few thousandths of the
-    model — well inside the cage extrusion, which is 2% of the diagonal.
+    it decided to. The bounding boxes PROPOSE placements — a scale (1, a uniform
+    factor, or the agreeing pair's factor when one axis was trimmed) and, per
+    axis, centre-to-centre or either end — and the target's own surface picks
+    between them: each candidate is scored by how much of the target lands within
+    reach of the source (see measure_reach), and "leave it where it is" is always
+    one of the candidates, so a source is only moved when moving it measurably
+    helps. Boxes alone cannot make that call: a lost spike shifts one end of one
+    axis, and a half-size source nested inside the target covers half of every
+    axis while its surface reaches almost none of the target's.
 
-    Two modes do the work. "applied" is a translation, for a source that is the
-    same size but pivoted elsewhere. "scaled" adds a uniform factor measured off
-    the bounding boxes, for a source that is the same shape in different units —
-    see the ALIGN_* constants for why that is a measurement rather than a guess.
-    Both then leave the two boxes concentric, which is what a bake needs.
+    `report["overlap"]` is that reach after alignment — the share of the target's
+    surface the bake's rays can find the source from — and is what the pre-flight
+    gate in main() tests. The worst-axis box overlap is kept alongside as
+    `box_overlap` for the error message and for comparison with the client, which
+    only has the boxes.
     """
+    import itertools
+
+    import bpy
     from mathutils import Matrix, Vector
 
     target = world_bounds([low])
@@ -354,12 +489,23 @@ def align_source(low, high_objects) -> dict:
     offset = [((t_min[i] + t_max[i]) - (s_min[i] + s_max[i])) / 2 for i in range(3)]
     distance = sum(o * o for o in offset) ** 0.5
 
+    zero = Vector((0.0, 0.0, 0.0))
+    untouched = measure_reach(samples, surface, 1.0, zero, reach)
     report = {
         "target_bounds": [t_min, t_max],
         "source_bounds": [s_min, s_max],
         "offset": offset,
-        "overlap_before": round(box_overlap(target, source), 4),
+        "reach_distance": round(reach, 6),
+        "box_overlap_before": round(box_overlap(target, source), 4),
+        "overlap_before": round(untouched["reach"], 4),
     }
+
+    def keep(mode: str) -> dict:
+        report["mode"] = mode
+        report["overlap"] = report["overlap_before"]
+        report["box_overlap"] = report["box_overlap_before"]
+        report["median_distance"] = round(untouched["median"], 6)
+        return report
 
     # A scale check has to tolerate the extremities simplification removes, which
     # is what ALIGN_SCALE_TOLERANCE is sized for. Compared against the diagonal
@@ -369,56 +515,75 @@ def align_source(low, high_objects) -> dict:
         abs(t_extent[i] - s_extent[i]) <= ALIGN_SCALE_TOLERANCE * max(diagonal, 1e-9)
         for i in range(3)
     )
+    ratio, trimmed = 1.0, []
     if not scale_matches:
-        # Different sizes, so the question is only whether they differ by ONE
-        # factor. If they do, undo it; if they do not, this is the honest refusal
-        # it has always been.
+        # Different sizes, so the question is whether they differ by ONE factor —
+        # on all three axes, or on two with the third trimmed short. If neither,
+        # this is the honest refusal it has always been.
         ratio = uniform_scale_ratio(t_extent, s_extent, diagonal)
-        if ratio is None or abs(ratio - 1.0) <= ALIGN_MIN_SCALE_DELTA:
-            report["mode"] = "skipped-scale"
-            report["overlap"] = report["overlap_before"]
-            if ratio is None:
-                report["scale_axes"] = [
-                    round(t_extent[i] / s_extent[i], 4) if s_extent[i] > 1e-9 else None
-                    for i in range(3)
-                ]
-            return report
+        if ratio is None:
+            fallback = trimmed_scale_ratio(t_extent, s_extent, diagonal)
+            if fallback is not None:
+                ratio, trimmed = fallback
+        if ratio is None:
+            report["scale_axes"] = [
+                round(t_extent[i] / s_extent[i], 4) if s_extent[i] > 1e-9 else None
+                for i in range(3)
+            ]
+            return keep("skipped-scale")
+        if abs(ratio - 1.0) <= ALIGN_MIN_SCALE_DELTA:
+            # The same size after all, with one axis trimmed past the tolerance
+            # above: a translation problem, and the anchors below solve it.
+            ratio = 1.0
 
-        # Scale about the SOURCE's own centre and land it on the target's, in one
-        # matrix. Doing it as a plain Matrix.Scale would scale the source's offset
-        # from the origin along with it and throw the mesh across the scene.
-        s_centre = Vector([(s_min[i] + s_max[i]) / 2 for i in range(3)])
-        t_centre = Vector([(t_min[i] + t_max[i]) / 2 for i in range(3)])
-        transform = (Matrix.Translation(t_centre)
-                     @ Matrix.Scale(ratio, 4)
-                     @ Matrix.Translation(-s_centre))
-        for obj in high_objects:
-            obj.matrix_world = transform @ obj.matrix_world
-        import bpy
-        bpy.context.view_layer.update()
+    # Per axis, where the rescaled source may sit: centred on the target always,
+    # and flush with either end wherever the two extents still disagree enough
+    # for the choice to matter.
+    anchors = []
+    for i in range(3):
+        options = {"centre": (t_min[i] + t_max[i]) / 2 - ratio * (s_min[i] + s_max[i]) / 2}
+        if abs(t_extent[i] - ratio * s_extent[i]) > ALIGN_TRIM_ANCHOR_FRAC * max(diagonal, 1e-9):
+            options["min"] = t_min[i] - ratio * s_min[i]
+            options["max"] = t_max[i] - ratio * s_max[i]
+        anchors.append(list(options.items()))
 
-        report["mode"] = "scaled"
-        report["scale"] = round(ratio, 6)
-        report["distance"] = round(distance, 6)
-        report["overlap"] = round(box_overlap(target, world_bounds(high_objects)), 4)
-        return report
+    best = None
+    for combo in itertools.product(*anchors):
+        translation = Vector([value for _, value in combo])
+        score = measure_reach(samples, surface, ratio, translation, reach)
+        key = (round(score["reach"], 3), -score["median"])
+        if best is None or key > best[0]:
+            best = (key, combo, translation, score)
+    _, combo, translation, score = best
 
-    if distance <= ALIGN_MIN_OFFSET_FRAC * max(diagonal, 1e-9):
-        report["mode"] = "not-needed"
-        report["overlap"] = report["overlap_before"]
-        return report
+    # Staying put wins ties: a placement that reaches no more of the target and
+    # sits no closer is a move for nothing. So does a same-scale shift too small
+    # to be anything but box noise.
+    stay = (round(untouched["reach"], 3), -untouched["median"]) >= best[0]
+    negligible = ratio == 1.0 and translation.length <= ALIGN_MIN_OFFSET_FRAC * max(diagonal, 1e-9)
+    if stay or negligible:
+        return keep("not-needed")
 
-    shift = Matrix.Translation(Vector(offset))
+    transform = Matrix.Translation(translation) @ Matrix.Scale(ratio, 4)
     for obj in high_objects:
-        # Through matrix_world so a mesh parented under an imported empty moves by
-        # the offset in WORLD space, which is the space the offset was measured in.
-        obj.matrix_world = shift @ obj.matrix_world
-    import bpy
+        # Through matrix_world so a mesh parented under an imported empty moves in
+        # WORLD space, which is the space every measurement above was taken in.
+        obj.matrix_world = transform @ obj.matrix_world
     bpy.context.view_layer.update()
 
-    report["mode"] = "applied"
-    report["distance"] = round(distance, 6)
-    report["overlap"] = round(box_overlap(target, world_bounds(high_objects)), 4)
+    report["mode"] = "applied" if ratio == 1.0 else "scaled"
+    if ratio != 1.0:
+        report["scale"] = round(ratio, 6)
+    report["translation"] = [round(v, 6) for v in translation]
+    report["distance"] = round(translation.length if ratio == 1.0 else distance, 6)
+    ends = {AXIS_NAMES[i]: name for i, (name, _) in enumerate(combo) if name != "centre"}
+    if ends:
+        report["anchors"] = ends
+    if trimmed:
+        report["trimmed_axes"] = [AXIS_NAMES[i] for i in trimmed]
+    report["overlap"] = round(score["reach"], 4)
+    report["median_distance"] = round(score["median"], 6)
+    report["box_overlap"] = round(box_overlap(target, world_bounds(high_objects)), 4)
     return report
 
 
@@ -745,32 +910,56 @@ def main() -> None:
     # ALIGN_* constants: a bake is ray casting, so an offset source produces black
     # wherever the boxes stop overlapping, and this is the only place that holds
     # both meshes and can tell.
+    #
+    # Cage extrusion is a distance, so a fixed default is only ever right for one
+    # mesh size: 5cm is generous on a 1m prop and invisible on a 20m building.
+    # 0 means "scale it to this mesh" — 2% of the bounding-box diagonal, which
+    # reaches far enough to catch protruding detail without punching through to
+    # surfaces on the far side. Settled before alignment because it is also the
+    # yardstick alignment measures reach with.
+    cage = float(options.get("cage_extrusion", 0.0))
+    if cage <= 0.0:
+        diagonal = max(low.dimensions.x, 1e-6) ** 2 + low.dimensions.y ** 2 + low.dimensions.z ** 2
+        cage = 0.02 * (diagonal ** 0.5)
+        emit("scene", 0.21, f"Auto cage extrusion: {cage:.4f}m")
+
     emit("align", 0.22, "Checking source alignment…")
+    samples = surface_samples(low, ALIGN_REACH_SAMPLES)
+    surface = SourceSurface(high_objects)
+    reach = ALIGN_REACH_FACTOR * cage
     if bool(options.get("align_source", True)):
-        alignment = align_source(low, high_objects)
+        alignment = align_source(low, high_objects, samples, surface, reach)
     else:
         target, source = world_bounds([low]), world_bounds(high_objects)
         # The bounds go in even here: they are what the refusal below quotes, and
         # an error naming (0,0,0)..(0,0,0) tells the reader nothing.
+        from mathutils import Vector
+        measured = measure_reach(samples, surface, 1.0, Vector((0.0, 0.0, 0.0)), reach)
         alignment = {
             "mode": "disabled",
             "target_bounds": [target[0], target[1]],
             "source_bounds": [source[0], source[1]],
-            "overlap": round(box_overlap(target, source), 4),
+            "reach_distance": round(reach, 6),
+            "overlap": round(measured["reach"], 4),
+            "median_distance": round(measured["median"], 6),
+            "box_overlap": round(box_overlap(target, source), 4),
         }
     if alignment["mode"] == "applied":
-        offset = alignment["offset"]
+        shift = alignment["translation"]
         emit("align", 0.23,
-             f"Source re-centred onto the target by ({offset[0]:.3f}, {offset[1]:.3f}, {offset[2]:.3f})m")
+             f"Source moved onto the target by ({shift[0]:.3f}, {shift[1]:.3f}, {shift[2]:.3f})m")
     elif alignment["mode"] == "scaled":
         emit("align", 0.23,
-             f"Source rescaled onto the target by {alignment['scale']:.4f}x and re-centred")
+             f"Source rescaled onto the target by {alignment['scale']:.4f}x and lined up")
 
     # Pre-flight rather than post-mortem: a bake with nothing to hit costs the same
     # minutes of Cycles time as a good one and then hands back maps that look
-    # plausible. Overlap is the honest gate, not matching extents — a source with
+    # plausible. Reach is the honest gate, not matching extents — a source with
     # extra geometry (a plinth the low-poly dropped) has mismatched extents and
     # bakes perfectly well, while a source that only reaches half the target cannot.
+    # And reach, not box overlap: a half-size source nested inside the target
+    # covers half of every axis (it passed this gate at 50.5% on assets 5902/7512)
+    # while its surface was within reach of 13% of the target's.
     require_overlap = float(options.get("require_overlap", 0.5))
     if require_overlap > 0 and alignment.get("overlap", 1.0) < require_overlap:
         t_min, t_max = alignment.get("target_bounds", ([0, 0, 0], [0, 0, 0]))
@@ -780,14 +969,16 @@ def main() -> None:
             "skipped-scale": "their sizes differ by a different amount on each axis, so they are "
                              "not one object at two scales and no single factor can line them up",
             "disabled": "automatic alignment is switched off",
-        }.get(alignment["mode"], "re-centring them did not bring them together")
+        }.get(alignment["mode"], "lining them up did not bring them together")
         fail(3,
              "The high-poly source does not overlap the mesh being baked to — "
-             f"only {alignment['overlap'] * 100:.0f}% of the target's smallest axis is covered, and {reason}. "
+             f"only {alignment['overlap'] * 100:.0f}% of the target's surface has the source within "
+             f"{alignment.get('reach_distance', 0):.3f}m of it, and {reason}. "
              f"Target bounds {fmt(t_min)}..{fmt(t_max)}, source bounds {fmt(s_min)}..{fmt(s_max)}. "
-             "A bake casts rays from the target onto the source, so a source that does not enclose "
-             "the target can only return blank texels. Pick the source this mesh was actually derived "
-             "from, or move it into the same space as the target.")
+             "A bake casts rays from the target onto the source, so a source that does not lie on "
+             "the target's surface can only return blank or wrong texels. Pick the source this mesh "
+             "was actually derived from, move it into the same space as the target, or raise the cage "
+             "extrusion if its detail stands further off the surface than that.")
 
     # A bake target needs a material with an image node to write into.
     material = bpy.data.materials.new(name="BakeTarget")
@@ -802,17 +993,7 @@ def main() -> None:
     bake = scene.render.bake
     bake.use_selected_to_active = True
 
-    # Cage extrusion is a distance, so a fixed default is only ever right for one
-    # mesh size: 5cm is generous on a 1m prop and invisible on a 20m building.
-    # 0 means "scale it to this mesh" — 2% of the bounding-box diagonal, which
-    # reaches far enough to catch protruding detail without punching through to
-    # surfaces on the far side.
-    cage = float(options.get("cage_extrusion", 0.0))
-    if cage <= 0.0:
-        diagonal = max(low.dimensions.x, 1e-6) ** 2 + low.dimensions.y ** 2 + low.dimensions.z ** 2
-        cage = 0.02 * (diagonal ** 0.5)
-        emit("scene", 0.22, f"Auto cage extrusion: {cage:.4f}m")
-    bake.cage_extrusion = cage
+    bake.cage_extrusion = cage  # sized above, before alignment
     bake.max_ray_distance = float(options.get("max_ray_distance", 0.0))
     # Margin dilates the baked islands outward so mip-mapping and bilinear
     # filtering cannot sample the empty gutter and bleed seams into the surface.
