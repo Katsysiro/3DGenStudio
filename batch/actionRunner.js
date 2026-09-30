@@ -1,5 +1,5 @@
 // Running a built-in batch action (Optimize / Auto UV / Auto Rig / Transfer Rig /
-// Bake) for one cell.
+// Bake / Flatten) for one cell.
 //
 // NODE ONLY — unlike actions.js and document.js, which the page imports too.
 // Shared by the backend batch loop (runner.js) and the MCP run_batch tool, which
@@ -20,14 +20,17 @@ import {
   BATCH_ACTION_AUTORIG,
   BATCH_ACTION_AUTOUV,
   BATCH_ACTION_BAKE,
+  BATCH_ACTION_FLATTEN,
   BATCH_ACTION_OPTIMIZE,
   BATCH_ACTION_TRANSFER_RIG,
+  FLATTEN_SHADER_LIGHTING,
   OPTIMIZE_REUNWRAP_PARAMETER,
   describeBakeMapProblem,
   getAutoUvActionOptions,
   getBakeActionMaps,
   getBatchActionDescriptor
 } from './actions.js';
+import { prepareFlattenGlb } from './flatten.js';
 
 // Below this the bake reached too little of the UV layout to be what was meant —
 // the same line the Mesh Editor draws (BAKE_COVERAGE_COMPLETE).
@@ -38,6 +41,10 @@ const BAKE_COVERAGE_WARNING = 0.95;
 // worth saying out loud before anyone bakes onto it. A flip count cannot see
 // this — the 2-3.5% overlaps the Auto UV overhaul found all had zero flips.
 const UV_OVERLAP_WARNING = 0.01;
+
+// Share of the flatten's atlas the packed islands occupy, below which the
+// albedo is mostly empty (see runFlatten).
+const FLATTEN_FILL_WARNING = 0.2;
 
 function meshBlob(buffer) {
   return new Blob([buffer], { type: 'model/gltf-binary' });
@@ -346,12 +353,79 @@ async function runBake(api, { projectId, inputs, onProgress }) {
   };
 }
 
+// The Export dialog's flatten (buildMeshFiles in ExportMeshDialog.jsx), with
+// the browser's atlas and material halves done by flatten.js instead. Same
+// notes, turned into warnings where they ask for something to be checked.
+async function runFlatten(api, { projectId, inputs, onProgress }) {
+  const source = await loadMeshInput(api, projectId, inputs.mesh, 'Mesh');
+  const shader = Object.hasOwn(FLATTEN_SHADER_LIGHTING, inputs.shader) ? inputs.shader : 'unlit';
+  const resolution = Math.round(Number(inputs.resolution)) || 2048;
+  const exposure = Number(inputs.exposure);
+  const baseName = path.basename(source.fileName, path.extname(source.fileName)) || 'mesh';
+
+  onProgress?.(2, 'Packing one UV atlas across every material');
+  const prepared = prepareFlattenGlb(source.buffer, { resolution });
+
+  const form = new FormData();
+  form.append('meshFile', meshBlob(prepared.bakeTarget), `${baseName}.glb`);
+  form.append('options', JSON.stringify({
+    resolution,
+    samples: Math.round(Number(inputs.samples)) || 64,
+    lighting: FLATTEN_SHADER_LIGHTING[shader],
+    exposure: Number.isFinite(exposure) ? Math.min(3, Math.max(-3, exposure)) : 0,
+    atlas_uv: prepared.channel
+  }));
+  const done = await api.apiFormSse('/meshes/flatten', form, progressFrom(onProgress, 5, 93));
+  const stats = done.stats?.tool || done.stats || {};
+  if (!done.maps?.albedo) throw new Error('The flatten bake returned no albedo');
+
+  onProgress?.(95, 'Applying the flattened albedo');
+  const { buffer, materialCount } = prepared.finish(Buffer.from(done.maps.albedo, 'base64'), {
+    hasAlpha: !!stats.has_alpha,
+    unlit: shader === 'unlit',
+    name: baseName
+  });
+
+  const { atlas } = prepared;
+  const warnings = [];
+  // A healthy repack fills 75-90%. Far below that the UVs tile or overlap
+  // themselves (mapped in metres, say), so every island's box is huge beside
+  // the area it paints and all of them shrank to fit.
+  if (atlas.repacked && atlas.fill < FLATTEN_FILL_WARNING) {
+    warnings.push(`The UV islands cover only ${Math.round(atlas.fill * 100)}% of the albedo — the layout tiles or overlaps itself, so each island had to shrink to fit. An Auto UV stage first gives it a layout that fills the texture`);
+  }
+  if (atlas.unmapped) {
+    warnings.push(`${atlas.unmapped.toLocaleString('en-US')} triangle${atlas.unmapped === 1 ? '' : 's'} without usable UVs were mapped one by one — an Auto UV stage first gives them a proper layout`);
+  }
+  // A tenth of the texels at the shoulder of the tone curve means the exposure
+  // is washing the brightest parts out.
+  if ((stats.clipped_frac || 0) > 0.1) {
+    warnings.push(`${Math.round(stats.clipped_frac * 100)}% of the albedo hit the highlight roll-off — lower the exposure if it looks washed out`);
+  }
+
+  return {
+    source,
+    buffer,
+    stats: {
+      shader,
+      resolution,
+      repacked: atlas.repacked,
+      islands: atlas.islands,
+      unmapped: atlas.unmapped,
+      materials: materialCount,
+      hasAlpha: !!stats.has_alpha
+    },
+    warnings
+  };
+}
+
 const RUNNERS = {
   [BATCH_ACTION_OPTIMIZE]: runOptimize,
   [BATCH_ACTION_AUTOUV]: runAutoUv,
   [BATCH_ACTION_AUTORIG]: runAutoRig,
   [BATCH_ACTION_TRANSFER_RIG]: runTransferRig,
-  [BATCH_ACTION_BAKE]: runBake
+  [BATCH_ACTION_BAKE]: runBake,
+  [BATCH_ACTION_FLATTEN]: runFlatten
 };
 
 // Run one cell of a built-in action and save its result.

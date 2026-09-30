@@ -2,7 +2,8 @@
 //
 // A stage used to be a ComfyUI workflow and nothing else. It is now an action:
 // a ComfyUI workflow, or one of the Mesh Editor's own tools (Optimize, Auto UV,
-// Auto Rig, Transfer Rig, Bake), which run in the backend without ComfyUI.
+// Auto Rig, Transfer Rig, Bake) or the Export dialog's Flatten, which run in the
+// backend without ComfyUI.
 //
 // Every built-in action DESCRIBES ITSELF AS A WORKFLOW — `parameters` with a
 // valueType and a default, `outputs` with a valueType. That is the whole trick:
@@ -28,9 +29,10 @@ export const BATCH_ACTION_AUTOUV = 'autouv'
 export const BATCH_ACTION_AUTORIG = 'autorig'
 export const BATCH_ACTION_TRANSFER_RIG = 'transferrig'
 export const BATCH_ACTION_BAKE = 'bake'
+export const BATCH_ACTION_FLATTEN = 'flatten'
 
 // Picker order.
-export const BATCH_ACTIONS = [BATCH_ACTION_COMFYUI, BATCH_ACTION_OPTIMIZE, BATCH_ACTION_AUTOUV, BATCH_ACTION_AUTORIG, BATCH_ACTION_TRANSFER_RIG, BATCH_ACTION_BAKE]
+export const BATCH_ACTIONS = [BATCH_ACTION_COMFYUI, BATCH_ACTION_OPTIMIZE, BATCH_ACTION_AUTOUV, BATCH_ACTION_AUTORIG, BATCH_ACTION_TRANSFER_RIG, BATCH_ACTION_BAKE, BATCH_ACTION_FLATTEN]
 
 export const BATCH_ACTION_LABELS = {
   [BATCH_ACTION_COMFYUI]: 'ComfyUI Workflow',
@@ -38,7 +40,8 @@ export const BATCH_ACTION_LABELS = {
   [BATCH_ACTION_AUTOUV]: 'Auto UV',
   [BATCH_ACTION_AUTORIG]: 'Auto Rig',
   [BATCH_ACTION_TRANSFER_RIG]: 'Transfer Rig',
-  [BATCH_ACTION_BAKE]: 'Bake'
+  [BATCH_ACTION_BAKE]: 'Bake',
+  [BATCH_ACTION_FLATTEN]: 'Flatten to Albedo'
 }
 
 // A stage written before actions existed has no field and is a ComfyUI stage.
@@ -102,6 +105,11 @@ export const BAKE_MAP_PARAMETERS = {
   roughness: 'bake_roughness',
   metallic: 'bake_metallic'
 }
+
+// Flatten's target shaders and the lighting preset each one bakes with — the
+// FLATTEN_SHADERS list in src/utils/meshFlatten.js, which the Export dialog
+// offers, and LIGHTING in python-server/app/tools/flatten_worker.py.
+export const FLATTEN_SHADER_LIGHTING = { unlit: 'studio', lit: 'soft' }
 
 const ACTION_DESCRIPTORS = {
   [BATCH_ACTION_OPTIMIZE]: {
@@ -278,6 +286,40 @@ const ACTION_DESCRIPTORS = {
         'Re-centre (and uniformly rescale) a high poly that sits elsewhere, so the rays find it'),
       toggle('require_overlap', 'Refuse a source that does not overlap', true,
         'Stop in seconds rather than spend minutes returning blank maps')
+    ]
+  },
+
+  [BATCH_ACTION_FLATTEN]: {
+    id: `action:${BATCH_ACTION_FLATTEN}`,
+    action: BATCH_ACTION_FLATTEN,
+    name: 'Flatten to Albedo',
+    description: 'The Export dialog’s “Flatten to one lit albedo (mobile)”, as a stage: bakes every material’s whole look — normal detail, occlusion, roughness, metal — into ONE colour texture under a neutral studio light, and gives the mesh one material that uses it. Specular highlights and cast shadows are left out on purpose. The existing UV islands are repacked into one atlas rather than re-unwrapped, so a rig, its skin weights and its animation clips come through unchanged. Runs a lit Cycles bake on the Mesh Tools service. Saved as a new version of the input mesh.',
+    kanbanColumn: 'Texturing',
+    desktopService: 'meshtools',
+    parentParameterId: 'mesh',
+    // Only a UV set, the materials and (for faces with no UVs) copies of
+    // existing vertices change: a Bake after it still sees the same shape.
+    keepsSurface: true,
+    outputs: [{ name: 'Flattened mesh', valueType: 'mesh' }],
+    parameters: [
+      mesh('mesh', 'Mesh', 'The mesh to flatten. Most of it needs UVs — put an Auto UV stage first for a mesh that has none'),
+      choice('shader', 'Target shader', 'unlit',
+        'Unlit bakes a soft dome and a gentle top key light, since the texture is the only light the mesh gets, and saves the material unlit (KHR_materials_unlit). Simple lit bakes occlusion and a soft fill only — the game’s own light supplies the direction — and saves a rough, non-metal material.',
+        [
+          { value: 'unlit', label: 'Unlit — studio lighting baked in' },
+          { value: 'lit', label: 'Simple lit — occlusion and soft fill only' }
+        ]),
+      {
+        ...number('resolution', 'Resolution', 2048, 'Albedo size in pixels. Cost scales with the square of this.'),
+        enums: [512, 1024, 2048, 4096]
+      },
+      {
+        ...number('samples', 'Samples', 64, 'Cycles samples per texel. 16 is a preview; raise it if cavities look grainy.'),
+        enums: [16, 32, 64, 128, 256]
+      },
+      number('exposure', 'Exposure (stops)', 0,
+        'Applied before the highlight roll-off. Lower it if the result looks washed out.',
+        { min: -3, max: 3, step: 0.25 })
     ]
   }
 }

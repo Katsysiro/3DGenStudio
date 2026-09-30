@@ -54,6 +54,9 @@ files:
   # meshPivot.js: root-level modules server.js imports have to be named here.
   - meshRigTransfer.js
   - skinTransfer.js
+  # Server-side smooth normals for normal-less GLBs, run before gltfpack on the
+  # optimize/LOD routes. Same rule as meshPivot.js: server.js imports it.
+  - meshNormals.js
   # Server-side VFX frame rendering behind /api/vfx/preview (the MCP
   # render_vfx_preview tool). Same rule as meshPivot.js.
   - vfxPreview.js
@@ -106,6 +109,11 @@ files:
   # under src/utils/vfx/ that imports a browser API would break the packaged
   # backend at startup, so keep this subtree pure.
   - src/utils/vfx/**/*
+  # The UV atlas packer, the second src/ exception on the same terms: it imports
+  # nothing at all, and the batch Flatten stage (batch/flatten.js) packs its
+  # atlas with it on the SERVER, exactly as the Export dialog does in the
+  # browser. Keep it import-free.
+  - src/utils/assemblyAtlas.js
   - version.json
   - package.json
   # Licences shown in-app. META-LLAMA-3-LICENSE is not documentation: the motion

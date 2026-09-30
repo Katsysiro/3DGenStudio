@@ -1,6 +1,6 @@
 // node batch/actions.test.mjs
 //
-// Built-in batch actions (Optimize / Auto UV / Auto Rig / Transfer Rig / Bake): the document
+// Built-in batch actions (Optimize / Auto UV / Auto Rig / Transfer Rig / Bake / Flatten): the document
 // rules that let them ride the workflow-shaped binding model, the glTF material
 // patch that applies a bake without a browser, and a whole backend run that
 // chains a ComfyUI mesh into Optimize, Auto Rig and Bake — against a fake backend.
@@ -430,7 +430,9 @@ function createBackend(stages) {
     // Extra stats the fake gltfpack reports (seams_broken, seam_limited).
     optimizeStats: {},
     autoUvTool: { n_charts: 12, fill_ratio: 0.71, overlap_share: 0, flipped_triangles: 0 },
-    inputMesh: null
+    inputMesh: null,
+    flattenTargets: [],
+    flattenClipped: 0
   };
 
   const addAsset = (asset) => {
@@ -484,6 +486,11 @@ function createBackend(stages) {
         // Marked by its material so a test can tell the unwrapped mesh was saved.
         const unwrapped = tinyGlb({ materials: [{ name: 'autouv', pbrMetallicRoughness: {} }] });
         return { type: 'done', mesh_b64: unwrapped.toString('base64'), stats: { tool: state.autoUvTool } };
+      }
+      if (path === '/meshes/flatten') {
+        const meshFile = Buffer.from(await form.get('meshFile').arrayBuffer());
+        state.flattenTargets.push(meshFile);
+        return { type: 'done', maps: { albedo: png('albedo').toString('base64') }, stats: { tool: { has_alpha: false, clipped_frac: state.flattenClipped } } };
       }
       if (path === '/meshes/bake') {
         return {
@@ -651,6 +658,79 @@ test('an action refuses an input that is not a mesh', async () => {
     /is an image, not a mesh/
   );
   assert.equal(state.cards.length, 0);
+});
+
+test('a Flatten stage seeds the Export dialog defaults and needs the Mesh Tools service', () => {
+  const stages = chain('flatten');
+  const flatten = stages[2];
+  assert.deepEqual(
+    { shader: flatten.inputs.shader, resolution: flatten.inputs.resolution, samples: flatten.inputs.samples, exposure: flatten.inputs.exposure },
+    { shader: 'unlit', resolution: 2048, samples: 64, exposure: 0 }
+  );
+  assert.deepEqual(flatten.bindings.mesh, { source: 'stage', stageId: 'stg-mesh' });
+  assert.deepEqual(getStageDesktopServices(flatten), ['meshtools']);
+  assert.equal(getBatchActionDescriptor('flatten').kanbanColumn, 'Texturing');
+  assert.deepEqual(validateBatch({ config: normalizeBatchConfig({ variables: [], groups: [{ id: 'g', name: 'A', values: {} }], stages }), workflowsById: WORKFLOWS }), []);
+});
+
+test('a Bake after a Flatten still reaches past it for the high poly', () => {
+  // generate -> optimize -> flatten -> bake: the flatten moved no vertex, so the
+  // high poly is the generated mesh, as it is after an Auto UV.
+  const stages = chain('optimize', 'flatten', 'bake');
+  const bake = stages[4];
+  assert.deepEqual(bake.bindings.low_poly, { source: 'stage', stageId: stages[3].id });
+  assert.deepEqual(bake.bindings.high_poly, { source: 'stage', stageId: 'stg-mesh' });
+});
+
+test('a Flatten cell bakes through the packed atlas and saves one unlit albedo material', async () => {
+  const { state, api } = createBackend([]);
+  state.assets.set(5, { id: 5, type: 'mesh', name: 'knight', filename: 'meshes/knight.glb' });
+  state.inputMesh = riggedGlb({ clips: 1 });
+  state.flattenClipped = 0.25;
+
+  const outcome = await executeBatchAction(api, {
+    action: 'flatten',
+    projectId: 7,
+    inputs: { mesh: 'asset:5', shader: 'unlit', resolution: 1024, samples: 32, exposure: -0.5 },
+    name: 'Knight flat',
+    cardKey: 'batch:r:g:s'
+  });
+
+  assert.equal(state.toolCalls[0].path, '/meshes/flatten');
+  assert.deepEqual(state.toolCalls[0].options, { resolution: 1024, samples: 32, lighting: 'studio', exposure: -0.5, atlas_uv: 1 });
+  const target = parseGlb(state.flattenTargets[0]).json;
+  assert.notEqual(target.meshes[0].primitives[0].attributes.TEXCOORD_1, undefined, 'the bake target carries the atlas');
+  assert.equal(target.animations, undefined);
+
+  const saved = parseGlb(state.saves[0].bytes).json;
+  assert.equal(state.saves[0].assetId, 5, 'saved as a version of its input');
+  assert.equal(saved.materials.length, 1);
+  assert.equal(saved.materials[0].name, 'knight_flat');
+  assert.deepEqual(saved.materials[0].extensions, { KHR_materials_unlit: {} });
+  assert.equal(saved.skins.length, 1, 'the rig survives');
+  assert.equal(saved.animations.length, 1, 'and so do its clips');
+  assert.equal(state.cards[0].column, 'Texturing');
+
+  assert.equal(outcome.stats.materials, 1);
+  assert.equal(outcome.stats.unmapped, 1);
+  assert.ok(outcome.warnings.some(warning => /mapped one by one/.test(warning)), outcome.warnings.join('\n'));
+  assert.ok(outcome.warnings.some(warning => /25% of the albedo hit the highlight roll-off/.test(warning)), outcome.warnings.join('\n'));
+});
+
+test('a simple-lit Flatten bakes the soft preset and saves a plain lit material', async () => {
+  const { state, api } = createBackend([]);
+  state.assets.set(5, { id: 5, type: 'mesh', name: 'crate', filename: 'meshes/crate.glb' });
+  await executeBatchAction(api, {
+    action: 'flatten',
+    projectId: 7,
+    inputs: { mesh: 'asset:5', shader: 'lit', resolution: 512, samples: 16, exposure: 0 },
+    name: 'Crate flat',
+    cardKey: 'batch:r:g:s'
+  });
+  assert.equal(state.toolCalls[0].options.lighting, 'soft');
+  const saved = parseGlb(state.saves[0].bytes).json;
+  assert.equal(saved.materials[0].extensions, undefined);
+  assert.equal(state.flattenTargets.length, 1);
 });
 
 for (const [name, fn] of queued) {

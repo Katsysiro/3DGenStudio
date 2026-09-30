@@ -179,8 +179,9 @@ function mapUnmappedFaces(geometry, uv, matrix) {
       }
     }
     // Either axis collapsed means no area to sample, not just a thin island.
-    if (!((maxU - minU) > 1e-7 && (maxV - minV) > 1e-7)) unmapped.push(...faces)
-    else mapped.push(...faces)
+    // A loop, not push(...faces): one big island overflows the call stack.
+    const into = (maxU - minU) > 1e-7 && (maxV - minV) > 1e-7 ? mapped : unmapped
+    for (const f of faces) into.push(f)
   }
   if (!unmapped.length) return { geometry, uv, unmapped: 0 }
 

@@ -6,6 +6,11 @@
 // it should be testable without a browser. The baking half lives next door in
 // assemblyAtlasBake.js.
 //
+// It is also the one file of src/utils/ outside vfx/ that the BACKEND loads:
+// the batch Flatten stage (batch/flatten.js) packs its atlas with it, so it
+// ships on its own in electron-builder.yml and the Dockerfile. Keep it free of
+// imports, or the packaged backend dies at startup.
+//
 // ---- Why repack, and not re-unwrap -------------------------------------------
 //
 // The app already has an unwrapper (Auto UV), and calling it on the merged mesh
