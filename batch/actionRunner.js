@@ -1,4 +1,5 @@
-// Running a built-in batch action (Optimize / Auto UV / Auto Rig / Bake) for one cell.
+// Running a built-in batch action (Optimize / Auto UV / Auto Rig / Transfer Rig /
+// Bake) for one cell.
 //
 // NODE ONLY — unlike actions.js and document.js, which the page imports too.
 // Shared by the backend batch loop (runner.js) and the MCP run_batch tool, which
@@ -20,6 +21,7 @@ import {
   BATCH_ACTION_AUTOUV,
   BATCH_ACTION_BAKE,
   BATCH_ACTION_OPTIMIZE,
+  BATCH_ACTION_TRANSFER_RIG,
   OPTIMIZE_REUNWRAP_PARAMETER,
   describeBakeMapProblem,
   getAutoUvActionOptions,
@@ -230,6 +232,65 @@ async function runAutoRig(api, { projectId, inputs, onProgress }) {
   return { source, buffer: Buffer.from(done.mesh_b64, 'base64'), stats: done.stats || null, warnings: [] };
 }
 
+// The backend twin of the Mesh Editor's "Transfer Rig From Mesh"
+// (meshRigTransfer.js behind /meshes/transfer-rig, the route MCP transfer_rig
+// uses too). It edits the target's glTF in place, so its materials, textures and
+// UVs come through byte for byte — the right thing to run after a Bake.
+async function runTransferRig(api, { projectId, inputs, onProgress }) {
+  const target = await loadMeshInput(api, projectId, inputs.mesh, 'Mesh (target)');
+  const rig = await loadMeshInput(api, projectId, inputs.rig_source, 'Rigged mesh (source)');
+  onProgress?.(10, `Transferring the rig from ${rig.name || 'the source mesh'}`);
+
+  const smoothIters = Number(inputs.smooth_iters);
+  const form = new FormData();
+  form.append('meshFile', meshBlob(target.buffer), target.fileName);
+  form.append('sourceFile', meshBlob(rig.buffer), rig.fileName);
+  form.append('options', JSON.stringify({ smooth_iters: Number.isFinite(smoothIters) ? Math.round(smoothIters) : 2 }));
+  const done = await api.apiForm('POST', '/meshes/transfer-rig', form);
+  if (!done?.mesh_b64) throw new Error(done?.error || 'The rig transfer returned no mesh');
+  const stats = done.stats || {};
+
+  const warnings = [];
+  if (stats.warning) warnings.push(stats.warning);
+  // Rescaling someone's rig silently would be worse than a warning, so it is
+  // said with the factor — the same thing the editor shows before its run.
+  if (stats.rescaled) {
+    warnings.push(`The source was ${(1 / stats.rescaled).toFixed(2)}x the size of the target on every axis, so it and its skeleton were scaled by ${Number(stats.rescaled).toFixed(3)}x and centred onto it`);
+  } else if (stats.recentred) {
+    warnings.push('The source sat elsewhere, so it and its skeleton were re-centred onto the target before sampling');
+  }
+  if (stats.farSample) {
+    warnings.push(`Some vertices reached ${Math.round(stats.farthestFraction * 100)}% of the mesh’s size for their weights — the source is not the same shape there, so check those parts when posed`);
+  }
+  const skipped = stats.skippedSourceParts || [];
+  if (skipped.length) {
+    warnings.push(`${skipped.length} part${skipped.length === 1 ? '' : 's'} of the source (${skipped.join(', ')}) ${skipped.length === 1 ? 'was' : 'were'} skipped for using bones outside its skeleton, so anything only they covered came back unweighted`);
+  }
+  if (Number(stats.missed) > 0) {
+    warnings.push(`${Number(stats.missed).toLocaleString('en-US')} vertices found no source surface and came back unweighted`);
+  }
+  // The glTF graft copies the skeleton and weights, not the clips — unlike the
+  // editor, which carries them on its rig scene.
+  let clips = 0;
+  try { clips = (parseGlb(rig.buffer).json.animations || []).length; } catch { clips = 0; }
+  if (clips > 0) {
+    warnings.push(`The source’s ${clips} animation clip${clips === 1 ? ' was' : 's were'} not copied — a batch transfer carries the skeleton and weights only; use the Mesh Editor to bring the clips too`);
+  }
+
+  return {
+    source: target,
+    buffer: Buffer.from(done.mesh_b64, 'base64'),
+    stats: {
+      bones: stats.bones ?? null,
+      vertices: stats.vertices ?? null,
+      missed: stats.missed ?? null,
+      farthestFraction: stats.farthestFraction ?? null,
+      rescaled: stats.rescaled || null
+    },
+    warnings
+  };
+}
+
 async function runBake(api, { projectId, inputs, onProgress }) {
   const maps = getBakeActionMaps(inputs);
   const mapProblem = describeBakeMapProblem(maps);
@@ -289,6 +350,7 @@ const RUNNERS = {
   [BATCH_ACTION_OPTIMIZE]: runOptimize,
   [BATCH_ACTION_AUTOUV]: runAutoUv,
   [BATCH_ACTION_AUTORIG]: runAutoRig,
+  [BATCH_ACTION_TRANSFER_RIG]: runTransferRig,
   [BATCH_ACTION_BAKE]: runBake
 };
 

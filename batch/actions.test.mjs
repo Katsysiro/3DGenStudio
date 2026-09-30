@@ -1,6 +1,6 @@
 // node batch/actions.test.mjs
 //
-// Built-in batch actions (Optimize / Auto UV / Auto Rig / Bake): the document
+// Built-in batch actions (Optimize / Auto UV / Auto Rig / Transfer Rig / Bake): the document
 // rules that let them ride the workflow-shaped binding model, the glTF material
 // patch that applies a bake without a browser, and a whole backend run that
 // chains a ComfyUI mesh into Optimize, Auto Rig and Bake — against a fake backend.
@@ -20,6 +20,7 @@ import {
 import { applyBakedMapsToGlb, executeBatchAction } from './actionRunner.js';
 import { createBatchRunner, isActiveBatchRun } from './runner.js';
 import { parseGlb, serializeGlb } from '../meshPivot.js';
+import { transferRig } from '../meshRigTransfer.js';
 
 let passed = 0;
 const queued = [];
@@ -90,6 +91,51 @@ function skinnedGlb() {
   json.skins = [{ joints: [1] }];
   json.nodes[0].skin = 0;
   return serializeGlb(json, bin);
+}
+
+// A triangle genuinely skinned to one bone (JOINTS_0 / WEIGHTS_0 and all), so
+// the real meshRigTransfer.js has something to sample. `clips` adds that many
+// (empty) animations, which the batch transfer does not carry; `scale` sizes it.
+function riggedGlb({ clips = 0, scale = 1 } = {}) {
+  const positions = Buffer.from(new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0].map(value => value * scale)).buffer);
+  const joints = Buffer.from(new Uint16Array(12).buffer);
+  const weights = Buffer.from(new Float32Array([1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0]).buffer);
+  const json = {
+    asset: { version: '2.0' },
+    buffers: [{ byteLength: 36 + 24 + 48 }],
+    bufferViews: [
+      { buffer: 0, byteOffset: 0, byteLength: 36 },
+      { buffer: 0, byteOffset: 36, byteLength: 24 },
+      { buffer: 0, byteOffset: 60, byteLength: 48 }
+    ],
+    accessors: [
+      { bufferView: 0, componentType: 5126, count: 3, type: 'VEC3', min: [0, 0, 0], max: [scale, scale, 0] },
+      { bufferView: 1, componentType: 5123, count: 3, type: 'VEC4' },
+      { bufferView: 2, componentType: 5126, count: 3, type: 'VEC4' }
+    ],
+    meshes: [{ primitives: [{ attributes: { POSITION: 0, JOINTS_0: 1, WEIGHTS_0: 2 } }] }],
+    nodes: [{ mesh: 0, skin: 0 }, { name: 'Hips' }],
+    skins: [{ joints: [1] }],
+    scenes: [{ nodes: [0, 1] }],
+    scene: 0,
+    ...(clips ? { animations: Array.from({ length: clips }, (_, i) => ({ name: `Clip ${i}`, channels: [], samplers: [] })) } : {})
+  };
+  return serializeGlb(json, Buffer.concat([positions, joints, weights]));
+}
+
+// Routes /meshes/transfer-rig through the REAL meshRigTransfer.js, as the
+// server route does, so the cell is tested against the transfer itself.
+function useRealTransfer(state, api) {
+  const baseForm = api.apiForm;
+  api.apiForm = async (method, path, form) => {
+    if (path !== '/meshes/transfer-rig') return baseForm(method, path, form);
+    const options = JSON.parse(form.get('options'));
+    state.toolCalls.push({ path, options });
+    const target = Buffer.from(await form.get('meshFile').arrayBuffer());
+    const source = Buffer.from(await form.get('sourceFile').arrayBuffer());
+    const result = transferRig(source, target, { smoothIters: options.smooth_iters });
+    return { mesh_b64: result.buffer.toString('base64'), stats: result.stats };
+  };
 }
 
 // --- the document ----------------------------------------------------------
@@ -277,6 +323,88 @@ test('a primitive with no material is given one to carry the maps', () => {
   const { json } = parseGlb(buffer);
   assert.equal(json.meshes[0].primitives[0].material, 0);
   assert.equal(json.materials[0].occlusionTexture.index, 0);
+});
+
+// --- transfer rig ------------------------------------------------------------
+
+test('a Transfer Rig takes its target from the stage before it and its rig from the nearest Auto Rig', () => {
+  // gen -> autorig -> optimize -> bake -> transferrig
+  const stages = chain('autorig', 'optimize', 'bake');
+  const stage = seededStage('transferrig', stages);
+  assert.deepEqual(stage.bindings.mesh, { source: 'stage', stageId: stages[4].id }, 'the target is the baked low poly');
+  assert.deepEqual(stage.bindings.rig_source, { source: 'stage', stageId: stages[2].id }, 'the rig is the Auto Rig, however far back');
+  assert.equal(stage.inputs.smooth_iters, 2);
+
+  assert.equal(getBatchActionDescriptor('transferrig').desktopService, null, 'nothing to start: the transfer runs in the backend');
+  assert.deepEqual(getStageDesktopServices(stage), []);
+});
+
+test('with no rig upstream a Transfer Rig source falls back to a mesh variable, never to the last stage', () => {
+  const stages = chain('optimize');
+  const descriptor = getBatchActionDescriptor('transferrig');
+  const variables = [{ id: 'var-rig', name: 'rig', type: 'mesh' }];
+  const bindings = createStageDefaultBindings(descriptor, stages, stages.length, variables);
+  assert.deepEqual(bindings.mesh, { source: 'stage', stageId: stages[2].id });
+  assert.deepEqual(bindings.rig_source, { source: 'variable', variableId: 'var-rig' });
+
+  const unbound = createStageDefaultBindings(descriptor, stages, stages.length, []);
+  assert.equal(unbound.rig_source, undefined, 'left for the user to bind rather than guessed');
+});
+
+test('validation refuses a Transfer Rig onto a mesh that already has a rig, or onto its own source', () => {
+  const stages = chain('autorig');
+  const transfer = { ...seededStage('transferrig', stages), id: 'stg-transfer' };
+  transfer.bindings.mesh = { source: 'stage', stageId: stages[2].id };
+  const config = { version: 1, variables: [], groups: [{ id: 'grp-a', name: '', values: {} }], stages: [...stages, transfer] };
+  const problems = validateBatch({ config, workflowsById: WORKFLOWS }).map(problem => problem.message);
+  assert.ok(problems.some(message => /already has a skeleton/.test(message)), problems.join('\n'));
+  assert.ok(problems.some(message => /the target and the rig source are the same mesh/.test(message)), problems.join('\n'));
+
+  transfer.bindings.mesh = { source: 'stage', stageId: 'stg-mesh' };
+  assert.deepEqual(validateBatch({ config, workflowsById: WORKFLOWS }), [], 'the generated mesh before the rig is a fine target');
+});
+
+test('a Transfer Rig cell runs the real transfer, saves a version of its target and says what it did not carry', async () => {
+  const { state, api } = createBackend([]);
+  state.assets.set(5, { id: 5, type: 'mesh', name: 'Knight low', filename: 'meshes/5.glb' });
+  state.assets.set(6, { id: 6, type: 'mesh', name: 'Knight rigged', filename: 'meshes/6.glb' });
+  // The source is the target at twice the size: the transfer scales it on.
+  api.fetchAssetBuffer = async file => (file === 'meshes/6.glb' ? riggedGlb({ clips: 2, scale: 2 }) : tinyGlb());
+  useRealTransfer(state, api);
+
+  const outcome = await executeBatchAction(api, {
+    action: 'transferrig',
+    projectId: 7,
+    inputs: { mesh: 'asset:5', rig_source: 'asset:6', smooth_iters: 1 },
+    name: 'Knight low rigged',
+    cardKey: 'batch:r:g:s'
+  });
+
+  assert.deepEqual(state.toolCalls, [{ path: '/meshes/transfer-rig', options: { smooth_iters: 1 } }]);
+  assert.equal(state.saves[0].assetId, 5, 'filed under the target, not the rig source');
+  const saved = parseGlb(state.saves[0].bytes).json;
+  assert.equal(saved.skins.length, 1);
+  assert.notEqual(saved.meshes[0].primitives[0].attributes.JOINTS_0, undefined);
+  assert.equal(saved.materials[0].name, 'Skin', 'the target material comes through untouched');
+  assert.equal(outcome.stats.bones, 1);
+  assert.equal(outcome.stats.rescaled, 0.5);
+  assert.ok(outcome.warnings.some(warning => /2\.00x the size/.test(warning)), outcome.warnings.join('\n'));
+  assert.ok(outcome.warnings.some(warning => /2 animation clips were not copied/.test(warning)), outcome.warnings.join('\n'));
+  assert.equal(state.cards[0].column, 'Rigging');
+});
+
+test('a Transfer Rig onto a mesh that already has a rig fails the cell with the transfer\'s own reason', async () => {
+  const { state, api } = createBackend([]);
+  state.assets.set(5, { id: 5, type: 'mesh', name: 'rigged', filename: 'meshes/5.glb' });
+  state.assets.set(6, { id: 6, type: 'mesh', name: 'rig', filename: 'meshes/6.glb' });
+  api.fetchAssetBuffer = async () => riggedGlb();
+  useRealTransfer(state, api);
+  await assert.rejects(
+    executeBatchAction(api, { action: 'transferrig', projectId: 7, inputs: { mesh: 'asset:5', rig_source: 'asset:6' }, name: 'x', cardKey: 'batch:r:g:s' }),
+    /already rigged/
+  );
+  assert.equal(state.saves.length, 0);
+  assert.equal(state.cards.length, 0);
 });
 
 // --- a whole run -----------------------------------------------------------

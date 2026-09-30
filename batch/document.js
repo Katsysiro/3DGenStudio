@@ -39,6 +39,7 @@
 import {
   BATCH_ACTION_BAKE,
   BATCH_ACTION_COMFYUI,
+  BATCH_ACTION_TRANSFER_RIG,
   BATCH_ACTION_LABELS,
   describeBakeMapProblem,
   getBakeActionMaps,
@@ -338,6 +339,21 @@ function keepsSurface(stage) {
   return Boolean(isBuiltInBatchAction(getStageAction(stage)) && getBatchActionDescriptor(getStageAction(stage))?.keepsSurface)
 }
 
+// A stage whose result always carries a skeleton (Auto Rig, Transfer Rig).
+function producesRig(stage) {
+  return Boolean(isBuiltInBatchAction(getStageAction(stage)) && getBatchActionDescriptor(getStageAction(stage))?.producesRig)
+}
+
+// The nearest earlier stage that produces a rig — a Transfer Rig's source. The
+// stages between the rig and the transfer vary (optimize, unwrap, bake…), so
+// no fixed distance back finds it.
+function findUpstreamRigStage(stages, stageIndex) {
+  for (let index = stageIndex - 1; index >= 0; index -= 1) {
+    if (producesRig(stages[index])) return stages[index]
+  }
+  return null
+}
+
 function findUpstreamStage(stages, stageIndex, offset) {
   if (stageIndex <= 0) return null
   let index = stageIndex - 1
@@ -358,7 +374,11 @@ export function createStageDefaultBindings(workflow, stages, stageIndex, variabl
       continue
     }
     const offset = Math.max(1, Number(parameter.defaultUpstreamOffset) || 1)
-    const upstream = findUpstreamStage(stages, stageIndex, offset)
+    // With no rig upstream a rig source falls through to a mesh variable — a
+    // rigged library mesh — rather than to whatever stage came last.
+    const upstream = parameter.defaultUpstreamRig
+      ? findUpstreamRigStage(stages, stageIndex)
+      : findUpstreamStage(stages, stageIndex, offset)
     if (upstream) {
       bindings[parameter.id] = { source: BINDING_STAGE, stageId: upstream.id }
       continue
@@ -679,6 +699,20 @@ export function validateBatch({ config, workflowsById }) {
       }
     }
 
+    // A transfer refuses a target that already has a skeleton, and the output
+    // of a rig-producing stage always has one — a sure failure, known now.
+    if (getStageAction(stage) === BATCH_ACTION_TRANSFER_RIG) {
+      const binding = getBinding(stage, 'mesh')
+      const upstreamIndex = binding.source === BINDING_STAGE ? stages.findIndex(item => item.id === binding.stageId) : -1
+      if (upstreamIndex !== -1 && producesRig(stages[upstreamIndex])) {
+        problems.push({
+          scope: 'stage',
+          stageId: stage.id,
+          message: `${getStageLabel(stage, stageIndex)} · Mesh (target): ${getStageLabel(stages[upstreamIndex], upstreamIndex)} already has a skeleton, and a rig cannot be transferred onto a mesh that has one — bind the mesh that lost its rig or never had one`
+        })
+      }
+    }
+
     // Pretend every upstream stage produced something, so only genuinely
     // unset values surface here rather than ordering artefacts.
     const pretendOutputs = {}
@@ -720,6 +754,11 @@ export function describeActionInputProblem(stage, inputs) {
       return 'the low poly and the high poly are the same mesh'
     }
     return describeBakeMapProblem(getBakeActionMaps(inputs))
+  }
+  if (getStageAction(stage) === BATCH_ACTION_TRANSFER_RIG) {
+    if (inputs?.mesh && inputs.mesh === inputs.rig_source) {
+      return 'the target and the rig source are the same mesh'
+    }
   }
   return null
 }

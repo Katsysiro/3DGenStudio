@@ -2,7 +2,7 @@
 //
 // A stage used to be a ComfyUI workflow and nothing else. It is now an action:
 // a ComfyUI workflow, or one of the Mesh Editor's own tools (Optimize, Auto UV,
-// Auto Rig, Bake), which run in the backend without ComfyUI.
+// Auto Rig, Transfer Rig, Bake), which run in the backend without ComfyUI.
 //
 // Every built-in action DESCRIBES ITSELF AS A WORKFLOW — `parameters` with a
 // valueType and a default, `outputs` with a valueType. That is the whole trick:
@@ -26,16 +26,18 @@ export const BATCH_ACTION_COMFYUI = 'comfyui'
 export const BATCH_ACTION_OPTIMIZE = 'optimize'
 export const BATCH_ACTION_AUTOUV = 'autouv'
 export const BATCH_ACTION_AUTORIG = 'autorig'
+export const BATCH_ACTION_TRANSFER_RIG = 'transferrig'
 export const BATCH_ACTION_BAKE = 'bake'
 
 // Picker order.
-export const BATCH_ACTIONS = [BATCH_ACTION_COMFYUI, BATCH_ACTION_OPTIMIZE, BATCH_ACTION_AUTOUV, BATCH_ACTION_AUTORIG, BATCH_ACTION_BAKE]
+export const BATCH_ACTIONS = [BATCH_ACTION_COMFYUI, BATCH_ACTION_OPTIMIZE, BATCH_ACTION_AUTOUV, BATCH_ACTION_AUTORIG, BATCH_ACTION_TRANSFER_RIG, BATCH_ACTION_BAKE]
 
 export const BATCH_ACTION_LABELS = {
   [BATCH_ACTION_COMFYUI]: 'ComfyUI Workflow',
   [BATCH_ACTION_OPTIMIZE]: 'Optimize',
   [BATCH_ACTION_AUTOUV]: 'Auto UV',
   [BATCH_ACTION_AUTORIG]: 'Auto Rig',
+  [BATCH_ACTION_TRANSFER_RIG]: 'Transfer Rig',
   [BATCH_ACTION_BAKE]: 'Bake'
 }
 
@@ -65,9 +67,11 @@ const AUTO_RIG_BONE_NAMES = [
 // Descriptor fields beyond the workflow shape: `action`, `kanbanColumn` (where the
 // result card lands), `desktopService` (which on-demand service the desktop app
 // has to start first — see getStageDesktopServices for the conditional one),
-// `parentParameterId` (see findParentAssetForStage) and `keepsSurface` (the
+// `parentParameterId` (see findParentAssetForStage), `keepsSurface` (the
 // action moves no vertex, so a Bake's default high poly looks past it — see
-// createStageDefaultBindings).
+// createStageDefaultBindings) and `producesRig` (the result always has a
+// skeleton: what a Transfer Rig's source defaults to, and what its target must
+// not be).
 
 // Parameter helpers. `label` is the hint line under the field, `name` the
 // field's title — the same split a ComfyUI workflow parameter uses.
@@ -192,6 +196,7 @@ const ACTION_DESCRIPTORS = {
     kanbanColumn: 'Rigging',
     desktopService: 'rigging',
     parentParameterId: 'mesh',
+    producesRig: true,
     outputs: [{ name: 'Rigged mesh', valueType: 'mesh' }],
     parameters: [
       mesh('mesh', 'Mesh', 'The mesh to rig — a single character, facing the front view'),
@@ -211,6 +216,30 @@ const ACTION_DESCRIPTORS = {
       number('num_beams', 'Beams', 15, 'Beam-search width', { min: 1, max: 20, step: 1 }),
       number('length_penalty', 'Length penalty', 2,
         'Above 1.0 favours skeletons with MORE bones — raise it when rigs stop short of the fingers or the tail', { min: 0.5, max: 3, step: 0.05 })
+    ]
+  },
+
+  [BATCH_ACTION_TRANSFER_RIG]: {
+    id: `action:${BATCH_ACTION_TRANSFER_RIG}`,
+    action: BATCH_ACTION_TRANSFER_RIG,
+    name: 'Transfer Rig',
+    description: 'Copies the skeleton and skin weights of an already-rigged mesh onto this one, exactly as the Mesh Editor’s “Transfer Rig From Mesh” does — typically the high poly’s Auto Rig onto the optimized, baked low poly, so every version shares one skeleton. Runs in the backend: no service and no GPU. Animation clips are not copied. Saved as a new version of the target mesh.',
+    kanbanColumn: 'Rigging',
+    // The transfer runs inside the backend itself: no service to start.
+    desktopService: null,
+    parentParameterId: 'mesh',
+    // It adds a skeleton and weights and moves no vertex.
+    keepsSurface: true,
+    producesRig: true,
+    outputs: [{ name: 'Rigged mesh', valueType: 'mesh' }],
+    parameters: [
+      mesh('mesh', 'Mesh (target)', 'The mesh to rig. It must not have a skeleton yet — an Auto UV, or an Optimize that re-unwrapped, drops one; a plain Optimize or a Bake keeps it.'),
+      // Seeded from the nearest earlier stage that produces a rig, not from a
+      // fixed distance back: the chain between the rig and this stage varies.
+      mesh('rig_source', 'Rigged mesh (source)', 'The mesh whose skeleton and weights are copied — usually an Auto Rig stage, or a rigged library mesh. It must be the same shape in the same place; a uniform difference in scale is corrected.', { defaultUpstreamRig: true }),
+      number('smooth_iters', 'Weight smoothing', 2,
+        'Averaging passes over the transferred weights. Softens the hard line a sparse mesh picks up where the nearest source point flips from one bone to another; too many wash small parts toward one bone.',
+        { min: 0, max: 4, step: 1 })
     ]
   },
 
