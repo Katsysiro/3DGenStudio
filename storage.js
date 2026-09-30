@@ -125,7 +125,8 @@ const NODE_TYPES = [
   { id: 5, name: 'Text' },
   { id: 6, name: 'Boolean' },
   { id: 7, name: 'Image Compare' },
-  { id: 8, name: 'Rig Mesh' }
+  { id: 8, name: 'Rig Mesh' },
+  { id: 9, name: 'Flatten to Albedo' }
 ];
 
 export const DEFAULT_SETTINGS = {

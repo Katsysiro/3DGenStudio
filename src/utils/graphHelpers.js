@@ -12,6 +12,10 @@ export const DEFAULT_OUTPUT_ID = 'output-0'
 export const DEFAULT_INPUT_ID = 'input-0'
 export const IMAGE_COMPARE_NODE_TYPE_NAME = 'Image Compare'
 export const RIG_MESH_NODE_TYPE_NAME = 'Rig Mesh'
+export const FLATTEN_MESH_NODE_TYPE_NAME = 'Flatten to Albedo'
+// Node kinds that run one tool on ONE connected mesh and output the resulting
+// mesh version: a single mesh-only input, and a mesh output.
+export const SINGLE_MESH_TOOL_NODE_KINDS = ['rigMesh', 'flattenMesh']
 export const IMAGE_COMPARE_INPUT_IDS = ['input-0', 'input-1']
 export const LEGACY_INPUT_ID = 'image-input'
 export const DEFAULT_CUSTOM_API_TYPE = 'image-generation'
@@ -56,7 +60,7 @@ export const IMAGE_API_LIST = [
   { id: 'openai_gpt_image_1_5', name: 'OpenAI · gpt-image-1.5' },
   { id: 'openai_gpt_image_2', name: 'OpenAI · gpt-image-2' }
 ]
-export const GRAPH_NODE_TYPE_OPTIONS = ['Image', 'Mesh', RIG_MESH_NODE_TYPE_NAME, IMAGE_COMPARE_NODE_TYPE_NAME, 'Number', 'Text', 'Boolean']
+export const GRAPH_NODE_TYPE_OPTIONS = ['Image', 'Mesh', RIG_MESH_NODE_TYPE_NAME, FLATTEN_MESH_NODE_TYPE_NAME, IMAGE_COMPARE_NODE_TYPE_NAME, 'Number', 'Text', 'Boolean']
 export const CONNECTOR_TYPE_META = {
   image: { key: 'image', label: 'Image', letter: 'I', color: '#8ff5ff', background: 'rgba(143, 245, 255, 0.14)' },
   mesh: { key: 'mesh', label: 'Mesh', letter: 'M', color: '#ac89ff', background: 'rgba(172, 137, 255, 0.14)' },
@@ -122,6 +126,10 @@ export function getNodeKind(nodeTypeName = '') {
     return 'rigMesh'
   }
 
+  if (normalizedNodeType === 'flatten to albedo') {
+    return 'flattenMesh'
+  }
+
   if (['mesh', 'mesh gen'].includes(normalizedNodeType)) {
     return 'meshGen'
   }
@@ -140,7 +148,7 @@ export function getDefaultNodeOutputType(nodeTypeName = '') {
     return null
   }
 
-  if (['meshGen', 'rigMesh'].includes(nodeKind)) {
+  if (nodeKind === 'meshGen' || SINGLE_MESH_TOOL_NODE_KINDS.includes(nodeKind)) {
     return 'mesh'
   }
 
@@ -196,8 +204,8 @@ export function canNodeTypeAcceptIncomingConnection(nodeTypeName = '', outputTyp
     return normalizeConnectorType(outputType) === 'image'
   }
 
-  // Auto Rig only knows how to rig a mesh, so its single input is mesh-only.
-  if (getNodeKind(nodeTypeName) === 'rigMesh') {
+  // Auto Rig and Flatten only work on a mesh, so their single input is mesh-only.
+  if (SINGLE_MESH_TOOL_NODE_KINDS.includes(getNodeKind(nodeTypeName))) {
     return normalizeConnectorType(outputType) === 'mesh'
   }
 
@@ -257,7 +265,7 @@ export function getNodeOutputType(node) {
 
   const nodeKind = node?.data?.nodeKind || node?.type
 
-  if (['meshGen', 'rigMesh'].includes(nodeKind)) {
+  if (nodeKind === 'meshGen' || SINGLE_MESH_TOOL_NODE_KINDS.includes(nodeKind)) {
     return 'mesh'
   }
 
@@ -313,8 +321,8 @@ export function buildInputConnectors(nodeId, currentNodes, currentEdges) {
     }))
   }
 
-  // Auto Rig takes exactly one mesh — no extra open connector to wire.
-  if (targetNode?.data?.nodeKind === 'rigMesh') {
+  // Auto Rig and Flatten take exactly one mesh — no extra open connector to wire.
+  if (SINGLE_MESH_TOOL_NODE_KINDS.includes(targetNode?.data?.nodeKind)) {
     return [{
       id: DEFAULT_INPUT_ID,
       type: 'mesh',

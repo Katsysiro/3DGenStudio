@@ -38,6 +38,7 @@ import {
   IMAGE_COMPARE_NODE_TYPE_NAME,
   LEGACY_INPUT_ID,
   MESH_FILE_EXTENSIONS,
+  SINGLE_MESH_TOOL_NODE_KINDS,
   HITEM_MESH_API_OPTION,
   HITEM_MESH_GENERATION_API_ID,
   TENCENT_GENERATION_TYPE_OPTIONS,
@@ -104,8 +105,10 @@ import GraphAssetNode from '../components/graph/GraphAssetNode'
 import GraphDeleteEdge from '../components/graph/GraphDeleteEdge'
 import GraphImageCompareNode from '../components/graph/GraphImageCompareNode'
 import GraphRigMeshNode from '../components/graph/GraphRigMeshNode'
+import GraphFlattenMeshNode from '../components/graph/GraphFlattenMeshNode'
 import GraphValueNode from '../components/graph/GraphValueNode'
 import { autoRig as runAutoRigService, ensureDesktopService, DEFAULT_AUTO_RIG_OPTIONS, pickAutoRigOptions } from '../utils/meshTools'
+import { DEFAULT_FLATTEN_OPTIONS, FLATTEN_SHADERS, flattenMeshMaterials, toUnlitGlb } from '../utils/meshFlatten'
 import usePasteImageFiles from '../hooks/usePasteImageFiles'
 import { saveWorkflowDefaults } from '../utils/workflowDefaults'
 import {
@@ -120,6 +123,7 @@ const flowNodeTypes = {
   imageCompare: GraphImageCompareNode,
   meshGen: GraphAssetNode,
   rigMesh: GraphRigMeshNode,
+  flattenMesh: GraphFlattenMeshNode,
   number: GraphValueNode,
   text: GraphValueNode,
   boolean: GraphValueNode
@@ -485,6 +489,18 @@ export default function GraphPage({ project }) {
     name: sourceAsset?.name ? `${sourceAsset.name} (rigged)` : '',
     ...DEFAULT_AUTO_RIG_OPTIONS
   }), [])
+
+  // Flatten to Albedo nodes work the same way: one mode, the Export dialog's
+  // flatten options, and the name the flattened version is saved under.
+  const createFlattenMeshNodeDraft = useCallback((sourceAsset = null) => ({
+    mode: 'flatten',
+    name: sourceAsset?.name ? `${sourceAsset.name} (flattened)` : '',
+    ...DEFAULT_FLATTEN_OPTIONS
+  }), [])
+
+  const createSingleMeshToolDraft = useCallback((nodeKind, sourceAsset = null) => (
+    nodeKind === 'flattenMesh' ? createFlattenMeshNodeDraft(sourceAsset) : createRigMeshNodeDraft(sourceAsset)
+  ), [createFlattenMeshNodeDraft, createRigMeshNodeDraft])
 
   const replaceFlowNodeData = useCallback((updatedNode) => {
     setNodes(currentNodes => currentNodes.map(node => (
@@ -973,8 +989,8 @@ export default function GraphPage({ project }) {
     }
 
     const needsWorkflows = openDrafts.some(draft => String(draft.mode || '').includes('comfy'))
-    // A rig panel picks its mesh from the wired input alone, so it needs neither.
-    const needsLibrary = openDrafts.some(draft => draft.mode && !['select', 'rig'].includes(draft.mode))
+    // A rig or flatten panel picks its mesh from the wired input alone, so it needs neither.
+    const needsLibrary = openDrafts.some(draft => draft.mode && !['select', 'rig', 'flatten'].includes(draft.mode))
 
     if (needsWorkflows) {
       ensureComfyWorkflowsLoaded().catch(err => {
@@ -1114,8 +1130,8 @@ export default function GraphPage({ project }) {
 
   const buildSelectDraft = useCallback((nodeId, nodeKind) => {
     const inputSources = buildNodeInputSources(nodeId, nodes, edges)
-    return nodeKind === 'rigMesh'
-      ? createRigMeshNodeDraft(getInputSource(nodes, edges, nodeId, 'mesh').asset)
+    return SINGLE_MESH_TOOL_NODE_KINDS.includes(nodeKind)
+      ? createSingleMeshToolDraft(nodeKind, getInputSource(nodes, edges, nodeId, 'mesh').asset)
       : nodeKind === 'meshGen'
       ? createMeshGenNodeDraft('select', getConnectedInputAssetFrom(nodes, edges, nodeId), inputSources, libraryImageOptions)
       : nodeKind === 'imageEdit'
@@ -1123,18 +1139,18 @@ export default function GraphPage({ project }) {
       : nodeKind === 'text'
       ? createTextNodeDraft('select', inputSources)
       : createImageNodeDraft('select', inputSources)
-  }, [createImageEditNodeDraft, createImageNodeDraft, createMeshGenNodeDraft, createRigMeshNodeDraft, createTextNodeDraft, edges, getConnectedInputAssetFrom, libraryImageOptions, nodes])
+  }, [createImageEditNodeDraft, createImageNodeDraft, createMeshGenNodeDraft, createSingleMeshToolDraft, createTextNodeDraft, edges, getConnectedInputAssetFrom, libraryImageOptions, nodes])
 
-  // A Rig Mesh node shows its Auto Rig parameters permanently (there is no mode
-  // menu to open them from), so seed a draft for any rig node that has none yet —
-  // freshly created ones, and older ones saved before this ran.
+  // Rig Mesh and Flatten to Albedo nodes show their parameters permanently (there
+  // is no mode menu to open them from), so seed a draft for any such node that has
+  // none yet — freshly created ones, and older ones saved before this ran.
   useEffect(() => {
     if (loading) {
       return
     }
 
     const seededNodes = nodes.filter(node => (
-      node.data.nodeKind === 'rigMesh' && !actionDraftsByNodeId[String(node.id)]
+      SINGLE_MESH_TOOL_NODE_KINDS.includes(node.data.nodeKind) && !actionDraftsByNodeId[String(node.id)]
     ))
 
     if (seededNodes.length === 0) {
@@ -1145,12 +1161,12 @@ export default function GraphPage({ project }) {
       const nextDrafts = { ...currentDrafts }
       for (const node of seededNodes) {
         if (!nextDrafts[String(node.id)]) {
-          nextDrafts[String(node.id)] = createRigMeshNodeDraft(getInputSource(nodes, edges, node.id, 'mesh').asset)
+          nextDrafts[String(node.id)] = createSingleMeshToolDraft(node.data.nodeKind, getInputSource(nodes, edges, node.id, 'mesh').asset)
         }
       }
       return nextDrafts
     })
-  }, [actionDraftsByNodeId, createRigMeshNodeDraft, edges, loading, nodes])
+  }, [actionDraftsByNodeId, createSingleMeshToolDraft, edges, loading, nodes])
 
   // BACK: rewind an open panel to the mode menu without closing it.
   const openActionDraft = useCallback((nodeId, nodeKind) => {
@@ -2263,6 +2279,141 @@ export default function GraphPage({ project }) {
           return
         }
 
+        // Flatten to Albedo: bake the connected mesh's whole PBR look into one lit
+        // albedo — the Export dialog's "Flatten to one lit albedo (mobile)", same
+        // code — and save the result as a new version of that mesh. An unlit
+        // target is saved unlit (KHR_materials_unlit), as the dialog's GLB is.
+        if (targetNode.data.nodeKind === 'flattenMesh') {
+          const sourceAsset = getInputSource(nodes, edges, targetNodeId, 'mesh').asset
+
+          if (!sourceAsset?.id || !sourceAsset?.filename) {
+            return
+          }
+
+          const versionName = String(targetDraft.name || '').trim() || `${sourceAsset.name || 'Mesh'} (flattened)`
+          const shader = FLATTEN_SHADERS.find(entry => entry.value === targetDraft.shader) || FLATTEN_SHADERS[0]
+          const resolution = Number(targetDraft.resolution) || DEFAULT_FLATTEN_OPTIONS.resolution
+          const samples = Number(targetDraft.samples) || DEFAULT_FLATTEN_OPTIONS.samples
+          const exposure = Math.min(3, Math.max(-3, Number(targetDraft.exposure) || 0))
+          const fileName = sourceAsset.filename.split('/').pop() || 'mesh.glb'
+          const baseName = fileName.replace(/.[^.]+$/, '') || 'mesh'
+
+          await setProcessingState('processing', 0, {
+            processingSource: 'Flatten',
+            parentAssetId: sourceAsset.id,
+            inputSource: getAssetSourceReference(sourceAsset),
+            error: null,
+            detail: 'Starting the Mesh Tools service'
+          }, {
+            progressDetail: 'Starting the Mesh Tools service',
+            currentNodeLabel: 'Flatten to Albedo'
+          })
+
+          try {
+            // Desktop: start the Mesh Tools service on demand (no-op elsewhere).
+            await ensureDesktopService('meshtools')
+
+            const meshResponse = await fetch(getAssetPreviewUrl(sourceAsset.filename))
+            if (!meshResponse.ok) {
+              throw new Error(`Failed to download the connected mesh (${meshResponse.status})`)
+            }
+            const meshBlob = await meshResponse.blob()
+
+            const flat = await flattenMeshMaterials(meshBlob, {
+              shader: shader.value,
+              resolution,
+              samples,
+              exposure,
+              baseName,
+              onProgress: evt => setNodeTransientData(targetNodeId, {
+                status: 'processing',
+                progress: Number.isFinite(Number(evt?.frac))
+                  ? Math.round(Math.max(0, Math.min(1, Number(evt.frac))) * 100)
+                  : null,
+                progressDetail: evt?.message || 'Flattening…',
+                currentNodeLabel: 'Flatten to Albedo'
+              })
+            })
+            const blob = shader.value === 'unlit' ? await toUnlitGlb(flat.blob, baseName) : flat.blob
+
+            setNodeTransientData(targetNodeId, {
+              status: 'processing',
+              progress: 100,
+              progressDetail: 'Saving the flattened mesh',
+              currentNodeLabel: 'Flatten to Albedo'
+            })
+
+            const meshFile = new File([blob], `${versionName}.glb`, { type: 'model/gltf-binary' })
+            const savedAsset = await saveMeshEdit({
+              assetId: sourceAsset.id,
+              filePath: '',
+              name: versionName,
+              saveMode: 'version',
+              meshFile
+            })
+
+            if (!savedAsset?.id) {
+              throw new Error('Flatten did not return a saved mesh version')
+            }
+
+            await ensureGeneratedMeshThumbnails([savedAsset])
+
+            // The Export dialog's notes, shortened for a node card.
+            const notes = [flat.atlas.repacked
+              ? `${Number(flat.atlas.islands || 0).toLocaleString()} UV islands repacked`
+              : 'original UV layout kept']
+            if (flat.materialCount > 1) {
+              notes.push(`${flat.materialCount} materials (parts differ in sidedness or transparency)`)
+            }
+            if (flat.atlas.unmapped) {
+              notes.push(`${flat.atlas.unmapped.toLocaleString()} triangles without UVs mapped one by one`)
+            }
+            if (flat.stats?.has_alpha) notes.push('alpha kept')
+            if ((flat.stats?.clipped_frac || 0) > 0.1) {
+              notes.push(`${Math.round(flat.stats.clipped_frac * 100)}% hit the highlight roll-off — lower the exposure if it looks washed out`)
+            }
+
+            await applyNodeResult(savedAsset, {
+              lastAction: 'flatten-albedo',
+              parentAssetId: sourceAsset.id,
+              error: null,
+              detail: notes.join(' · '),
+              lastActionParams: buildLastActionParams({
+                source: 'Flatten to Albedo',
+                label: 'Mesh Tools lit albedo bake',
+                params: [
+                  { label: 'Input mesh', type: 'mesh', value: sourceAsset.name, boundFrom: sourceAsset.name },
+                  { label: 'Version name', type: 'string', value: versionName },
+                  { label: 'Target shader', type: 'string', value: shader.label },
+                  { label: 'Resolution', type: 'number', value: resolution },
+                  { label: 'Samples', type: 'number', value: samples },
+                  { label: 'Exposure (stops)', type: 'number', value: exposure },
+                  { label: 'UV islands repacked', type: 'boolean', value: Boolean(flat.atlas.repacked) },
+                  { label: 'Materials', type: 'number', value: flat.materialCount }
+                ]
+              })
+            })
+          } catch (err) {
+            const failureMessage = err.message || 'Flatten failed'
+            await setProcessingState('error', null, {
+              processingSource: 'Flatten',
+              parentAssetId: sourceAsset.id,
+              error: failureMessage,
+              detail: failureMessage
+            }, {
+              progressDetail: failureMessage,
+              currentNodeLabel: 'Flatten failed'
+            })
+            addNotification({
+              title: 'Flatten to Albedo failed',
+              message: failureMessage,
+              source: 'Mesh Tools service',
+              tone: 'error'
+            })
+          }
+          return
+        }
+
         if (targetNode.data.nodeKind === 'meshGen') {
           // When a mesh is connected to (and therefore used to edit) this node, the
           // generated mesh should become a version (child) of that connected mesh
@@ -3321,8 +3472,8 @@ export default function GraphPage({ project }) {
       }
     }
 
-    // Auto Rig takes a single mesh and nothing else.
-    if (targetNode.data.nodeKind === 'rigMesh') {
+    // Auto Rig and Flatten take a single mesh and nothing else.
+    if (SINGLE_MESH_TOOL_NODE_KINDS.includes(targetNode.data.nodeKind)) {
       if (targetHandleId !== DEFAULT_INPUT_ID || getNodeOutputType(sourceNode) !== 'mesh') {
         return
       }
@@ -3370,7 +3521,7 @@ export default function GraphPage({ project }) {
       return IMAGE_COMPARE_INPUT_IDS.includes(targetHandleId) && getNodeOutputType(sourceNode) === 'image'
     }
 
-    if (targetNode.data.nodeKind === 'rigMesh') {
+    if (SINGLE_MESH_TOOL_NODE_KINDS.includes(targetNode.data.nodeKind)) {
       return targetHandleId === DEFAULT_INPUT_ID && getNodeOutputType(sourceNode) === 'mesh'
     }
 
@@ -3688,6 +3839,7 @@ export default function GraphPage({ project }) {
     if (node.type === 'number') return '#79e388'
     if (node.type === 'imageEdit') return '#ac89ff'
     if (node.type === 'rigMesh') return '#ac89ff'
+    if (node.type === 'flattenMesh') return '#ac89ff'
     return '#8ff5ff'
   }, [])
 

@@ -319,7 +319,8 @@
   border-color: rgba(255, 154, 98, 0.26);
 }
 
-.graph-node--rigMesh {
+.graph-node--rigMesh,
+.graph-node--flattenMesh {
   border-color: rgba(172, 137, 255, 0.24);
 }
 
