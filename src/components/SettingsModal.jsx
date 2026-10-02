@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useSettings } from '../context/SettingsContext.shared'
 import { API_BASE } from '../config'
 import ServerSettingsTab from './ServerSettingsTab'
@@ -434,6 +434,104 @@ function AutoStartToggle({ checked, onChange, warning }) {
   )
 }
 
+// Desktop-only: one Python service's connection, which is either on this
+// computer or on another one (a Mac frontend using an NVIDIA box's Rigging).
+// Which one is the main process's call — it applies the same rule ensureService
+// does — so this asks it about the form's current URL/port (even unsaved) and
+// renders:
+//   - this computer: `children` (installer, Start/Stop, auto-start) plus the
+//     switch that lets other computers connect to it;
+//   - another one: whether it answers there. Nothing is installed or started
+//     here for it, so the local controls would only mislead.
+// Outside the desktop app it renders `children`, which render nothing there.
+function ServiceConnection({ name, url, port, defaultPort, allowNetwork, onAllowNetworkChange, children }) {
+  const bridge = typeof window !== 'undefined' ? window.genStudioServices : null
+  const isDesktop = !!bridge?.isDesktop && typeof bridge.target === 'function'
+  // undefined = first answer pending; null = the check itself failed
+  const [target, setTarget] = useState(undefined)
+  const [checking, setChecking] = useState(false)
+  const requestRef = useRef(0)
+  const firstRef = useRef(true)
+
+  const check = useCallback(async () => {
+    const id = ++requestRef.current
+    setChecking(true)
+    try {
+      const res = await bridge.target(name, url, port)
+      if (id === requestRef.current) setTarget(res?.ok ? res : null)
+    } catch {
+      if (id === requestRef.current) setTarget(null)
+    } finally {
+      if (id === requestRef.current) setChecking(false)
+    }
+  }, [bridge, name, url, port])
+
+  // Immediately on open, then debounced while the user types an address.
+  useEffect(() => {
+    if (!isDesktop) return undefined
+    const delay = firstRef.current ? 0 : 600
+    firstRef.current = false
+    const t = setTimeout(check, delay)
+    return () => clearTimeout(t)
+  }, [isDesktop, check])
+
+  if (!isDesktop) return children
+  if (target === undefined) return null
+
+  const btn = {
+    fontFamily: 'inherit', fontSize: '12px', fontWeight: 600, cursor: checking ? 'default' : 'pointer',
+    borderRadius: '8px', padding: '6px 14px', border: '1px solid rgba(255,255,255,0.12)',
+    background: '#1b2130', color: '#e8eaf0', opacity: checking ? 0.6 : 1,
+  }
+
+  if (target?.remote) {
+    const dotColor = checking ? '#e0a030' : target.reachable ? '#4caf50' : '#f87171'
+    return (
+      <div style={{ marginTop: '8px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6em' }}>
+          <span style={{ width: 9, height: 9, borderRadius: '50%', background: dotColor, boxShadow: target.reachable && !checking ? '0 0 6px #4caf50' : 'none', flex: 'none' }} />
+          <span className="settings-helper-text" style={{ margin: 0 }}>
+            {checking ? `Checking ${target.address}…`
+              : target.reachable ? `Connected to ${target.address}`
+              : `Can't reach ${target.address}${target.error ? ` (${target.error})` : ''}`}
+          </span>
+          <div style={{ flex: 1 }} />
+          <button type="button" style={btn} onClick={check} disabled={checking}>Test connection</button>
+        </div>
+        <p className="settings-helper-text">
+          This service runs on another computer, so it isn&apos;t installed or started from here.
+          On that computer, install it, turn on &ldquo;Allow other computers to connect&rdquo; in
+          these settings, and start it there (or turn on &ldquo;Start automatically&rdquo;) —
+          requests from here don&apos;t start it. Save your changes here before using it.
+        </p>
+      </div>
+    )
+  }
+
+  const shownPort = String(port || '').trim() || String(defaultPort)
+  const lan = target?.lanAddresses || []
+  return (
+    <>
+      {children}
+      <label style={{ display: 'flex', alignItems: 'center', gap: '0.5em', marginTop: '10px', cursor: 'pointer' }}>
+        <input type="checkbox" checked={!!allowNetwork} onChange={e => onAllowNetworkChange(e.target.checked)} />
+        <span className="settings-helper-text" style={{ margin: 0 }}>Allow other computers to connect</span>
+      </label>
+      {allowNetwork && (
+        <p className="settings-helper-text">
+          {lan.length
+            ? <>Other computers can use it at <b>{lan.map(a => `http://${a}`).join(', ')}</b> with port <b>{shownPort}</b>: enter that in their Settings. </>
+            : <>This computer has no network address right now, so other computers can&apos;t reach it yet. </>}
+          There is no password on this service, so anyone on your network can use it: only turn
+          this on for a network you trust, and let port {shownPort} through the firewall.
+          Requests from other computers don&apos;t start it, so start it here or turn on
+          &ldquo;Start automatically&rdquo;. If it is already running, save, then stop and start it.
+        </p>
+      )}
+    </>
+  )
+}
+
 // Desktop-only: install one of the opt-in services after first run — for users
 // who upgraded, skipped it on the setup screen, or later added a GPU. Drives the
 // same uv provisioning as the first-run window via the genStudioSetup bridge and
@@ -684,6 +782,12 @@ export default function SettingsModal({ onClose }) {
   // process, and gating the inputs on the local copy would let a stale form make
   // them editable again.
   const comfyManaged = !!settings?.apis?.comfyui?.managed
+
+  // One field of one apis.<key> block in the form copy.
+  const setApiField = (key, field, value) => setLocalSettings(prev => ({
+    ...prev,
+    apis: { ...prev?.apis, [key]: { ...prev?.apis?.[key], [field]: value } }
+  }))
 
   const handleSave = async () => {
     // `apis.comfyui.managed` and the paths/port that go with it are owned by the
@@ -1259,14 +1363,20 @@ export default function SettingsModal({ onClose }) {
                   app it starts automatically when you use those tools; you can also start or
                   stop it here. Outside the desktop app, start it from python-server/run.
                 </p>
-                <ServiceControl name="meshtools" />
-                <AutoStartToggle
-                  checked={localSettings?.apis?.meshtools?.autoStart}
-                  onChange={v => setLocalSettings(prev => ({
-                    ...prev,
-                    apis: { ...prev?.apis, meshtools: { ...prev?.apis?.meshtools, autoStart: v } }
-                  }))}
-                />
+                <ServiceConnection
+                  name="meshtools"
+                  url={localSettings?.apis?.meshtools?.url}
+                  port={localSettings?.apis?.meshtools?.port}
+                  defaultPort={8200}
+                  allowNetwork={localSettings?.apis?.meshtools?.allowNetwork}
+                  onAllowNetworkChange={v => setApiField('meshtools', 'allowNetwork', v)}
+                >
+                  <ServiceControl name="meshtools" />
+                  <AutoStartToggle
+                    checked={localSettings?.apis?.meshtools?.autoStart}
+                    onChange={v => setApiField('meshtools', 'autoStart', v)}
+                  />
+                </ServiceConnection>
               </div>
 
               <h3 className="settings-section-title font-label">Rigging (Python) Connection</h3>
@@ -1323,21 +1433,27 @@ export default function SettingsModal({ onClose }) {
                   In the desktop app it starts on demand; Stop it here to free GPU memory.
                   Outside the desktop app, start it from thirdparty/skintokens/run_server.
                 </p>
-                <ServiceInstaller
-                  service="rigging"
-                  buttonLabel="Install rigging service"
-                  readyText="Rigging service is installed and ready."
-                  note="One-time install; downloads several GB and needs an NVIDIA GPU (≥14 GB)."
-                />
-                <ServiceControl name="rigging" />
-                <AutoStartToggle
-                  warning
-                  checked={localSettings?.apis?.rigtools?.autoStart}
-                  onChange={v => setLocalSettings(prev => ({
-                    ...prev,
-                    apis: { ...prev?.apis, rigtools: { ...prev?.apis?.rigtools, autoStart: v } }
-                  }))}
-                />
+                <ServiceConnection
+                  name="rigging"
+                  url={localSettings?.apis?.rigtools?.url}
+                  port={localSettings?.apis?.rigtools?.port}
+                  defaultPort={8300}
+                  allowNetwork={localSettings?.apis?.rigtools?.allowNetwork}
+                  onAllowNetworkChange={v => setApiField('rigtools', 'allowNetwork', v)}
+                >
+                  <ServiceInstaller
+                    service="rigging"
+                    buttonLabel="Install rigging service"
+                    readyText="Rigging service is installed and ready."
+                    note="One-time install; downloads several GB and needs an NVIDIA GPU (≥14 GB)."
+                  />
+                  <ServiceControl name="rigging" />
+                  <AutoStartToggle
+                    warning
+                    checked={localSettings?.apis?.rigtools?.autoStart}
+                    onChange={v => setApiField('rigtools', 'autoStart', v)}
+                  />
+                </ServiceConnection>
               </div>
 
               <h3 className="settings-section-title font-label">Motion Generation (Python) Connection</h3>
@@ -1423,22 +1539,28 @@ export default function SettingsModal({ onClose }) {
                   minutes idle, so the GPU stays free for rigging and ComfyUI.
                   Outside the desktop app, start it from thirdparty/kimodo/run_server.
                 </p>
-                <LlamaLicenseGate onChange={setLlamaAccepted} />
-                <ServiceInstaller
-                  service="motion"
-                  buttonLabel="Install motion service"
-                  readyText="Motion service is installed and ready."
-                  note="One-time install; downloads ~17 GB and needs an NVIDIA GPU."
-                  blockedReason={llamaAccepted ? '' : 'Accept the Meta Llama 3 Community License above first — the text encoder downloads Meta Llama 3 weights.'}
-                />
-                <ServiceControl name="motion" />
-                <AutoStartToggle
-                  checked={localSettings?.apis?.motiontools?.autoStart}
-                  onChange={v => setLocalSettings(prev => ({
-                    ...prev,
-                    apis: { ...prev?.apis, motiontools: { ...prev?.apis?.motiontools, autoStart: v } }
-                  }))}
-                />
+                <ServiceConnection
+                  name="motion"
+                  url={localSettings?.apis?.motiontools?.url}
+                  port={localSettings?.apis?.motiontools?.port}
+                  defaultPort={8400}
+                  allowNetwork={localSettings?.apis?.motiontools?.allowNetwork}
+                  onAllowNetworkChange={v => setApiField('motiontools', 'allowNetwork', v)}
+                >
+                  <LlamaLicenseGate onChange={setLlamaAccepted} />
+                  <ServiceInstaller
+                    service="motion"
+                    buttonLabel="Install motion service"
+                    readyText="Motion service is installed and ready."
+                    note="One-time install; downloads ~17 GB and needs an NVIDIA GPU."
+                    blockedReason={llamaAccepted ? '' : 'Accept the Meta Llama 3 Community License above first — the text encoder downloads Meta Llama 3 weights.'}
+                  />
+                  <ServiceControl name="motion" />
+                  <AutoStartToggle
+                    checked={localSettings?.apis?.motiontools?.autoStart}
+                    onChange={v => setApiField('motiontools', 'autoStart', v)}
+                  />
+                </ServiceConnection>
               </div>
 
               <h3 className="settings-section-title font-label">Video to Motion (Python) Connection</h3>
@@ -1531,20 +1653,26 @@ export default function SettingsModal({ onClose }) {
                   before video can drive it.
                 </p>
 
-                <ServiceInstaller
-                  service="mocap"
-                  buttonLabel="Install video-to-motion service"
-                  readyText="Video-to-motion service is installed and ready."
-                  note="One-time install; downloads roughly 3 GB (PyTorch, Blender-as-a-module and the checkpoint) and needs an NVIDIA GPU."
-                />
-                <ServiceControl name="mocap" />
-                <AutoStartToggle
-                  checked={localSettings?.apis?.mocaptools?.autoStart}
-                  onChange={v => setLocalSettings(prev => ({
-                    ...prev,
-                    apis: { ...prev?.apis, mocaptools: { ...prev?.apis?.mocaptools, autoStart: v } }
-                  }))}
-                />
+                <ServiceConnection
+                  name="mocap"
+                  url={localSettings?.apis?.mocaptools?.url}
+                  port={localSettings?.apis?.mocaptools?.port}
+                  defaultPort={8401}
+                  allowNetwork={localSettings?.apis?.mocaptools?.allowNetwork}
+                  onAllowNetworkChange={v => setApiField('mocaptools', 'allowNetwork', v)}
+                >
+                  <ServiceInstaller
+                    service="mocap"
+                    buttonLabel="Install video-to-motion service"
+                    readyText="Video-to-motion service is installed and ready."
+                    note="One-time install; downloads roughly 3 GB (PyTorch, Blender-as-a-module and the checkpoint) and needs an NVIDIA GPU."
+                  />
+                  <ServiceControl name="mocap" />
+                  <AutoStartToggle
+                    checked={localSettings?.apis?.mocaptools?.autoStart}
+                    onChange={v => setApiField('mocaptools', 'autoStart', v)}
+                  />
+                </ServiceConnection>
               </div>
             </section>
           )}

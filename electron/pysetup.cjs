@@ -637,17 +637,20 @@ function killTree(pid) {
 }
 
 // ---- Launchers -------------------------------------------------------------
-function startPythonServer({ serviceDir, venvDir, port, logStream, log }) {
+// `host` is the address each service binds. Loopback by default; 0.0.0.0 when
+// the user lets other computers use it (Settings -> "Allow other computers to
+// connect"), which is how a GPU machine serves a frontend running elsewhere.
+function startPythonServer({ serviceDir, venvDir, port, host = '127.0.0.1', logStream, log }) {
   return startService({
     name: 'mesh-tools', serviceDir, venvDir, script: 'main.py', logStream, log,
-    env: { MESHTOOLS_HOST: '127.0.0.1', MESHTOOLS_PORT: String(port) },
+    env: { MESHTOOLS_HOST: host, MESHTOOLS_PORT: String(port) },
   });
 }
 
-function startSkintokens({ serviceDir, venvDir, dataDir, port, logStream, log }) {
+function startSkintokens({ serviceDir, venvDir, dataDir, port, host = '127.0.0.1', logStream, log }) {
   // RIGTOOLS_DATA_DIR makes rig_server.py chdir to the same writable folder the
   // weights were downloaded into, so its relative model lookups resolve.
-  const env = { RIGTOOLS_HOST: '127.0.0.1', RIGTOOLS_PORT: String(port) };
+  const env = { RIGTOOLS_HOST: host, RIGTOOLS_PORT: String(port) };
   if (dataDir) env.RIGTOOLS_DATA_DIR = dataDir;
   return startService({ name: 'rigging', serviceDir, venvDir, script: 'rig_server.py', logStream, log, env });
 }
@@ -660,16 +663,16 @@ function startSkintokens({ serviceDir, venvDir, dataDir, port, logStream, log })
 // It spawns the text-encoder sidecar as a child, so stopping it has to kill the
 // tree — startService already does (killTree), which is the whole reason that
 // helper exists.
-function startKimodo({ serviceDir, venvDir, dataDir, modelsDir, llamaBase, port, logStream, log }) {
-  const env = { KIMODO_HOST: '127.0.0.1', KIMODO_PORT: String(port) };
+function startKimodo({ serviceDir, venvDir, dataDir, modelsDir, llamaBase, port, host = '127.0.0.1', logStream, log }) {
+  const env = { KIMODO_HOST: host, KIMODO_PORT: String(port) };
   if (dataDir) env.KIMODO_DATA_DIR = dataDir;
   if (modelsDir) env.KIMODO_CHECKPOINT_DIR = modelsDir;
   if (llamaBase) env.KIMODO_LLAMA_BASE = llamaBase;
   return startService({ name: 'motion', serviceDir, venvDir, script: 'motion_server.py', logStream, log, env });
 }
 
-function startMocap({ serviceDir, venvDir, dataDir, modelsDir, port, logStream, log }) {
-  const env = { MOCAP_HOST: '127.0.0.1', MOCAP_PORT: String(port) };
+function startMocap({ serviceDir, venvDir, dataDir, modelsDir, port, host = '127.0.0.1', logStream, log }) {
+  const env = { MOCAP_HOST: host, MOCAP_PORT: String(port) };
   // Without MOCAP_DATA_DIR the service would cache per-rig bakes under
   // %LOCALAPPDATA%; pointing it at the app's data root keeps everything the
   // desktop app writes in one place the uninstaller can offer by name.

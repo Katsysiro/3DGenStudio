@@ -23,6 +23,10 @@ contextBridge.exposeInMainWorld('genStudioServices', {
   start: (name) => ipcRenderer.invoke('services:start', { name }),
   stop: (name) => ipcRenderer.invoke('services:stop', { name }),
   status: () => ipcRenderer.invoke('services:status'),
+  // Does this URL/port (straight from the Settings form) name another computer,
+  // and does the service answer there? -> { ok, remote, address, reachable,
+  // error, lanAddresses }. name: 'meshtools' | 'rigging' | 'motion' | 'mocap'.
+  target: (name, url, port) => ipcRenderer.invoke('services:target', { name, url, port }),
   // Re-point apis.comfyui.* at the managed install. Resolves { ok, port, path,
   // modelsPath } or { ok: false, error }.
   useManagedComfy: () => ipcRenderer.invoke('comfyui:use-managed'),

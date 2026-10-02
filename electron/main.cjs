@@ -16,6 +16,7 @@ const { app, BrowserWindow, shell, dialog, ipcMain } = require('electron');
 const path = require('node:path');
 const http = require('node:http');
 const net = require('node:net');
+const os = require('node:os');
 const fs = require('node:fs');
 const { spawn } = require('node:child_process');
 const {
@@ -591,7 +592,105 @@ async function resolveConfiguredPort(svc, fallback) {
   const api = settings?.apis?.[svc.settingsKey] || {};
   const p = Number(api.port);
   svc.port = Number.isFinite(p) && p > 0 ? p : fallback;
+  // Loopback unless the user opted into serving other computers (a GPU machine
+  // used by a frontend elsewhere). Read at start time like the port, so a change
+  // applies on the next start.
+  svc.host = api.allowNetwork ? '0.0.0.0' : '127.0.0.1';
   return api;
+}
+
+// --- Services on another computer ---------------------------------------------
+// A Python service whose Settings URL names another machine (a Mac frontend
+// using an NVIDIA box's Rigging) is not ours to install, start or stop — the
+// backend proxy already talks to whatever URL is configured, so all that is left
+// here is to check it answers. Without this, every on-demand start looked for a
+// LOCAL install first and refused with "not installed", whatever the URL said.
+
+// IPv4/IPv6 addresses of this machine's own interfaces. Typing this machine's
+// LAN IP into its own Settings still means "this machine", not a remote one.
+function ownAddresses() {
+  const out = new Set();
+  for (const list of Object.values(os.networkInterfaces())) {
+    for (const a of list || []) out.add(String(a.address).toLowerCase());
+  }
+  return out;
+}
+
+// The addresses other computers on the LAN can use to reach this one — shown
+// next to "Allow other computers to connect" so the user knows what to type on
+// the other machine.
+function lanAddresses() {
+  const out = [];
+  for (const list of Object.values(os.networkInterfaces())) {
+    for (const a of list || []) {
+      if (a.family === 'IPv4' && !a.internal && !a.address.startsWith('169.254.')) out.push(a.address);
+    }
+  }
+  return out;
+}
+
+function isLocalHost(hostname) {
+  const h = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '');
+  if (!h || h === 'localhost' || h === '0.0.0.0' || h === '::' || h === '::1' || h.startsWith('127.')) return true;
+  if (h === os.hostname().toLowerCase()) return true;
+  return ownAddresses().has(h);
+}
+
+// { baseUrl, address } when `api` (a service's settings block) points at another
+// computer, else null. Same URL/port rules as the backend's build*BaseUrl helpers
+// (server.js) — they must agree on where the service is.
+function remoteTarget(api, defaultPort) {
+  const raw = String(api?.url || '').trim();
+  if (!raw) return null;
+  let parsed;
+  try { parsed = new URL(/^https?:\/\//i.test(raw) ? raw : `http://${raw}`); } catch { return null; }
+  if (isLocalHost(parsed.hostname)) return null;
+  const port = String(api?.port || parsed.port || defaultPort).trim();
+  parsed.port = port;
+  parsed.pathname = ''; parsed.search = ''; parsed.hash = '';
+  return { baseUrl: parsed.toString().replace(/\/$/, ''), address: `${parsed.hostname}:${port}` };
+}
+
+// Does the remote service answer its health check? { ok } or { ok: false, error }.
+async function probeRemote(target, healthPath = '/health', timeoutMs = 4000) {
+  try {
+    const res = await fetch(`${target.baseUrl}${healthPath}`, { signal: AbortSignal.timeout(timeoutMs) });
+    return res.ok ? { ok: true } : { ok: false, error: `it answered with HTTP ${res.status}` };
+  } catch (err) {
+    if (err?.name === 'TimeoutError') return { ok: false, error: 'no answer — wrong address, or a firewall' };
+    const code = err?.cause?.code;
+    const why = {
+      ECONNREFUSED: 'nothing is listening on that port',
+      ECONNRESET: 'the connection was refused',
+      ENOTFOUND: 'that computer name could not be found',
+      EAI_AGAIN: 'that computer name could not be found',
+      EHOSTUNREACH: 'that computer is unreachable',
+      ENETUNREACH: 'that network is unreachable',
+    }[code] || code || err?.message || 'unreachable';
+    return { ok: false, error: why };
+  }
+}
+
+function remoteUnreachableMessage(svc, target, error) {
+  return `Can't reach ${svc.label} at ${target.address} (${error}). It runs on another computer, so `
+    + `3D Gen Studio can't start it from here: on that computer, start it in Settings → Mesh Tools → `
+    + `${svc.label} and turn on "Allow other computers to connect", and make sure its firewall lets `
+    + `port ${target.address.split(':').pop()} through.`;
+}
+
+// Last remote target and health per service, refreshed by services:status, so
+// serviceStatus() (synchronous) can report it.
+const remoteState = {};
+
+async function refreshRemoteState() {
+  const settings = await fetchSettings();
+  if (!settings) return;
+  await Promise.all(Object.entries(SERVICES || {}).map(async ([name, svc]) => {
+    const target = svc.remoteCapable ? remoteTarget(settings.apis?.[svc.settingsKey], svc.defaultPort) : null;
+    if (!target) { delete remoteState[name]; return; }
+    const probe = await probeRemote(target, svc.healthPath, 2500);
+    remoteState[name] = { address: target.address, reachable: probe.ok };
+  }));
 }
 
 function serviceRegistry() {
@@ -600,29 +699,29 @@ function serviceRegistry() {
       // reqsTag: a requirements.txt bump flips this service back to
       // "not installed" until setup re-runs (incrementally) and re-tags it.
       label: 'Mesh Tools', venv: PY_VENV, port: PYTHON_PORT, reqsTag: MESHTOOLS_REQS_TAG, logFile: 'python.log',
-      settingsKey: 'meshtools',
+      settingsKey: 'meshtools', remoteCapable: true, defaultPort: PYTHON_PORT,
       resolveLaunch: (svc) => resolveConfiguredPort(svc, PYTHON_PORT),
       start(port) {
         return startPythonServer({
-          serviceDir: PYTHON_DIR, venvDir: PY_VENV, port,
+          serviceDir: PYTHON_DIR, venvDir: PY_VENV, port, host: this.host,
           logStream: openLogStream('python.log'), log,
         });
       },
     },
     rigging: {
       label: 'Rigging', venv: RIG_VENV, port: RIG_PORT, logFile: 'rig.log',
-      settingsKey: 'rigtools',
+      settingsKey: 'rigtools', remoteCapable: true, defaultPort: RIG_PORT,
       resolveLaunch: (svc) => resolveConfiguredPort(svc, RIG_PORT),
       start(port) {
         return startSkintokens({
-          serviceDir: SKINTOKENS_DIR, venvDir: RIG_VENV, dataDir: RIG_DATA, port,
+          serviceDir: SKINTOKENS_DIR, venvDir: RIG_VENV, dataDir: RIG_DATA, port, host: this.host,
           logStream: openLogStream('rig.log'), log,
         });
       },
     },
     motion: {
       label: 'Motion Generation', venv: MOTION_VENV, port: MOTION_PORT, logFile: 'kimodo.log',
-      settingsKey: 'motiontools',
+      settingsKey: 'motiontools', remoteCapable: true, defaultPort: MOTION_PORT,
       // Port and model folder both live in settings, so they are read at start
       // time — changing either in Settings takes effect on the next start rather
       // than on the next app launch.
@@ -633,14 +732,14 @@ function serviceRegistry() {
       start(port) {
         return startKimodo({
           serviceDir: KIMODO_DIR, venvDir: MOTION_VENV, dataDir: MOTION_DATA,
-          modelsDir: this.modelsDir, llamaBase: LLAMA_BASE, port,
+          modelsDir: this.modelsDir, llamaBase: LLAMA_BASE, port, host: this.host,
           logStream: openLogStream('kimodo.log'), log,
         });
       },
     },
     mocap: {
       label: 'Video to Motion', venv: MOCAP_VENV, port: MOCAP_PORT, logFile: 'mocap.log',
-      settingsKey: 'mocaptools',
+      settingsKey: 'mocaptools', remoteCapable: true, defaultPort: MOCAP_PORT,
       // Same as motion: port and model folder are read at start time, so a
       // change in Settings takes effect on the next start rather than the next
       // app launch.
@@ -651,7 +750,7 @@ function serviceRegistry() {
       start(port) {
         return startMocap({
           serviceDir: MOCAP_DIR, venvDir: MOCAP_VENV, dataDir: MOCAP_DATA,
-          modelsDir: this.modelsDir, port,
+          modelsDir: this.modelsDir, port, host: this.host,
           logStream: openLogStream('mocap.log'), log,
         });
       },
@@ -729,6 +828,23 @@ function ensureService(name) {
   if (name === 'comfyui' && comfyMaintenance) {
     return Promise.reject(new Error(`${comfyMaintenance} ComfyUI will be startable once it finishes.`));
   }
+  if (starting[name]) return starting[name];
+  if (svc.remoteCapable) return ensureMaybeRemote(name, svc);
+  return ensureLocal(name, svc);
+}
+
+// The install check has to wait for the settings: a service on another computer
+// is never installed HERE, and that is fine.
+async function ensureMaybeRemote(name, svc) {
+  const settings = await fetchSettings();
+  const target = settings ? remoteTarget(settings.apis?.[svc.settingsKey], svc.defaultPort) : null;
+  if (!target) return ensureLocal(name, svc);
+  const probe = await probeRemote(target, svc.healthPath);
+  remoteState[name] = { address: target.address, reachable: probe.ok };
+  if (!probe.ok) throw new Error(remoteUnreachableMessage(svc, target, probe.error));
+}
+
+function ensureLocal(name, svc) {
   if (!serviceInstalled(svc)) {
     return Promise.reject(new Error(`${svc.label} is not installed yet. Install it in Settings.`));
   }
@@ -756,7 +872,7 @@ function ensureService(name) {
     adopted.delete(name); // this one is ours from here on
     svc.port = port;
 
-    log(`Starting ${name} service on demand (port ${port})`);
+    log(`Starting ${name} service on demand (port ${port}${svc.host === '0.0.0.0' ? ', open to other computers' : ''})`);
     const handle = svc.start(port);
     handles[name] = handle;
 
@@ -820,13 +936,33 @@ function serviceStatus() {
       starting: !!starting[name],
       // Answering, but not spawned by us — Stop cannot touch it.
       external: adopted.has(name),
+      // Settings point at another computer: { address, reachable } — nothing
+      // here is installed or started for it.
+      remote: remoteState[name] || null,
     };
   }
   return out;
 }
 
 function registerServicesIpc() {
-  ipcMain.handle('services:status', async () => { await pruneAdopted(); return serviceStatus(); });
+  ipcMain.handle('services:status', async () => {
+    await Promise.all([pruneAdopted(), refreshRemoteState()]);
+    return serviceStatus();
+  });
+  // Where would this URL/port send the service, and does it answer there? Takes
+  // the values from the Settings form (possibly unsaved) so the form can switch
+  // between its local controls and the remote status as the user types.
+  // Resolves { ok, remote: false, lanAddresses } for this machine, or
+  // { ok, remote: true, address, reachable, error } for another one.
+  ipcMain.handle('services:target', async (_e, { name, url, port } = {}) => {
+    const svc = SERVICES?.[name];
+    if (!svc?.remoteCapable) return { ok: false, error: `Unknown service: ${name}` };
+    const target = remoteTarget({ url, port }, svc.defaultPort);
+    if (!target) return { ok: true, remote: false, lanAddresses: lanAddresses() };
+    const probe = await probeRemote(target, svc.healthPath);
+    remoteState[name] = { address: target.address, reachable: probe.ok };
+    return { ok: true, remote: true, address: target.address, reachable: probe.ok, error: probe.error || null };
+  });
   // Reveal the log directory in the OS file manager. The Logs panel reads the
   // files over the API; this is the escape hatch for attaching them to a bug
   // report — and the only way to reach the previous session's *.prev.log.

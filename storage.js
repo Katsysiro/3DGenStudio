@@ -280,14 +280,19 @@ export const DEFAULT_SETTINGS = {
       port: '8200',
       // Desktop app: start this service automatically at launch (default off —
       // services otherwise start on demand or from Settings).
-      autoStart: true
+      autoStart: true,
+      // Desktop app: bind 0.0.0.0 instead of loopback so another computer (a
+      // frontend on a machine without a GPU) can use this one's service. Same
+      // flag on rigtools/motiontools/mocaptools. No auth on these services.
+      allowNetwork: false
     },
     rigtools: {
       url: 'http://127.0.0.1',
       port: '8300',
       // Desktop app: start the rigging service at launch. Default off — it pins
       // ~14GB of GPU memory for the whole session.
-      autoStart: false
+      autoStart: false,
+      allowNetwork: false
     },
     motiontools: {
       url: 'http://127.0.0.1',
@@ -300,7 +305,8 @@ export const DEFAULT_SETTINGS = {
       modelsPath: '',
       // Desktop app: start the motion service at launch. Default off — the text
       // encoder alone is ~16 GB of RAM once a prompt has been encoded.
-      autoStart: false
+      autoStart: false,
+      allowNetwork: false
     },
     mocaptools: {
       url: 'http://127.0.0.1',
@@ -311,7 +317,8 @@ export const DEFAULT_SETTINGS = {
       modelsPath: '',
       // Desktop app: start the video-to-motion service at launch. Default off —
       // a capture peaks around 10 GB of VRAM, which would sit next to rigging.
-      autoStart: false
+      autoStart: false,
+      allowNetwork: false
     },
     custom: []
   },
