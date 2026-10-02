@@ -139,6 +139,7 @@
 					"Inputs": [
 						{ "Node": "21", "Input": "image",  "Name": "Position Image",    "Type": "Image"  },
 						{ "Node": "37", "Input": "image",  "Name": "Textured View",     "Type": "Image"  },
+						{ "Node": "22", "Input": "image",  "Name": "Reference Image",   "Type": "Image"  },
 						{ "Node": "8",  "Input": "prompt", "Name": "Prompt",            "Type": "String" },
 						{ "Node": "20", "Input": "seed",   "Name": "Seed",              "Type": "Number" },
 						{ "Node": "34", "Input": "value",  "Name": "Image Resolution",  "Type": "Number" },

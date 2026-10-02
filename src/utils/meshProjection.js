@@ -803,7 +803,10 @@ export function dilateProjectionGutter(outputData, coverage, width, height, radi
 //   • does NOT repaint the interior of a region an earlier layer already owns
 //     (so later views never change already-textured faces);
 //   • blends only within `blendPixels` of the already-owned boundary (the seam),
-//     so the "Blend overlap" slider widens the cross-fade WITHOUT removing coverage.
+//     so the "Blend overlap" slider widens the cross-fade WITHOUT removing coverage;
+//   • may take over the RIM of an earlier layer — texels that layer only saw near
+//     its own silhouette (`edgeFadeMap` < 1, from the GPU bake) — in proportion to
+//     how much better it sees them. Scaled by "Opacity seams" like the seam blend.
 // This matches the intent: front view owns what it sees; the next view fills the
 // rest and feathers across the join.
 //
@@ -833,6 +836,13 @@ export function resolveProjectionLayersIntoImageData(outputData, layerSnapshots,
   // cross-fade: a later view blends in proportional to how well IT sees the texel
   // RELATIVE to the best committed view there (not an absolute threshold).
   const committedConf = new Float32Array(pixelCount)
+  // Strongest silhouette-edge fade among the committed layers per texel (see
+  // `edgeFadeMap` on a snapshot; 1 = interior of some view, ~0 = only ever seen at a
+  // view's silhouette). Where it is below 1 the owner is unsure of its own pixel —
+  // the rim is where a generated view bleeds backdrop colour and where a view that
+  // drifted from the geometry misses — so a later view may take the texel over in
+  // proportion. Layers without a map (CPU bake) count as interior everywhere.
+  const committedEdge = new Float32Array(pixelCount)
   // Base strength a later view blends into an owned seam texel at the very border;
   // ramps to 0 `blendPixels` inside. Scaled per layer by its "Opacity seams" knob.
   const SEAM_MAX = 0.7
@@ -889,6 +899,8 @@ export function resolveProjectionLayersIntoImageData(outputData, layerSnapshots,
               : null))
       : null
 
+    const edgeFade = layer.edgeFadeMap?.length === pixelCount ? layer.edgeFadeMap : null
+
     for (let i = 0; i < pixelCount; i += 1) {
       if (!layer.coverageMask[i]) {
         continue
@@ -916,13 +928,15 @@ export function resolveProjectionLayersIntoImageData(outputData, layerSnapshots,
           // only data here, so no base/checker bleed and nothing is left untextured.
           influence = opacity
         }
-      } else if (ownedDist && ownedDist[i] >= 0) {
-        // Owned by an earlier layer AND within blendPixels of a genuine inter-view seam
-        // → cross-fade. Interior texels (dist -1) stay locked, so the blend never
-        // touches UV-chart edges or coverage holes — only the view-ownership boundary.
-        const dEdge = ownedDist[i] // pixels from the seam (0 at the seam, growing inward)
-        const t = clamp01(1 - dEdge / Math.max(1, blendPx)) // 1 at the seam → 0 blendPx inside
-        // RELATIVE-confidence cross-fade: how well THIS view sees the texel versus the
+        // Keep-texture mode: the base under this texel is real texture, so the view's
+        // silhouette rim fades into it instead of painting the rim's backdrop-tinted
+        // colour. With a fresh checkerboard base the rim still paints fully — it is
+        // the only data there, and fading it would show the checker.
+        if (blendWithBase && edgeFade) {
+          influence = Math.min(influence, edgeFade[i] * opacity)
+        }
+      } else {
+        // RELATIVE-confidence weight: how well THIS view sees the texel versus the
         // best view already committed here. This avoids every brittle absolute threshold:
         //  • both views see it comparably (a normal view-to-view seam) → ~0.5 → smooth
         //    50/50 cross-fade across the band (the arm seam now actually blends);
@@ -935,10 +949,26 @@ export function resolveProjectionLayersIntoImageData(outputData, layerSnapshots,
         const ownerConf = committedConf[i] || 0
         const relWeight = thisConf / (thisConf + ownerConf + 1e-4)
 
-        influence = (t * t * (3 - 2 * t)) * relWeight * (seamMax / SEAM_MAX) * opacity
-      } else {
-        // Owned and no blend requested → strict lock, do not change.
-        influence = 0
+        let seamInfluence = 0
+        if (ownedDist && ownedDist[i] >= 0) {
+          // Within blendPixels of a genuine inter-view seam → cross-fade. Interior
+          // texels (dist -1) stay locked, so the blend never touches UV-chart edges or
+          // coverage holes — only the view-ownership boundary.
+          const dEdge = ownedDist[i] // pixels from the seam (0 at the seam, growing inward)
+          const t = clamp01(1 - dEdge / Math.max(1, blendPx)) // 1 at the seam → 0 blendPx inside
+          seamInfluence = (t * t * (3 - 2 * t)) * relWeight * (seamMax / SEAM_MAX) * opacity
+        }
+
+        // Rim takeover: the owner only saw this texel near its own silhouette, so a
+        // later view that sees it better replaces it in proportion. Deep inside every
+        // owner (committedEdge 1) this is 0 — already-textured faces stay locked.
+        // Both confidences already include each view's own edge fade.
+        let rimInfluence = 0
+        if (committedEdge[i] < 1) {
+          rimInfluence = (1 - committedEdge[i]) * relWeight * (seamMax / SEAM_MAX) * opacity
+        }
+
+        influence = Math.max(seamInfluence, rimInfluence)
       }
 
       if (influence <= 1e-4) {
@@ -971,6 +1001,8 @@ export function resolveProjectionLayersIntoImageData(outputData, layerSnapshots,
         committed[i] = 1
         const c = layerConf ? (layerConf[i] || 0) : 1
         if (c > committedConf[i]) committedConf[i] = c
+        const e = edgeFade ? edgeFade[i] : 1
+        if (e > committedEdge[i]) committedEdge[i] = e
       }
     }
   }

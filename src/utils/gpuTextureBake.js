@@ -57,6 +57,17 @@ const DEFAULT_ALPHA = 6.0
 const DEFAULT_MIN_BIAS = 0.0008
 const DEFAULT_MAX_BIAS = 0.0045
 const SUV_EDGE_EPS = 0.0015
+// Silhouette-edge fade (ported from image-to-3dlab's Pixel Match). A view's weight
+// ramps from ~0 at the mesh's silhouette IN THAT VIEW to full over this many source
+// -image pixels. The silhouette is where a generated view bleeds its backdrop/matte
+// colour and where a view that drifted a few pixels from the geometry misses the
+// surface, so those texels should be the first to give way to a better view.
+const DEFAULT_EDGE_FADE_PX = 6
+// Occlusion edges (an arm in front of the torso) fade too: neighbouring depth-map
+// pixels whose LINEAR depth differs by more than this fraction of the mesh's
+// bounding diameter are treated as a silhouette. 0.02 ≈ a surface tilted ~87° at
+// 1024px, so ordinary slopes never trigger it. 0 = outer silhouette only.
+const DEFAULT_EDGE_DEPTH_JUMP = 0.02
 
 // ── Capability detection ────────────────────────────────────────────────────
 let cachedSupport = null
@@ -258,6 +269,10 @@ uniform float uCullBackfaces;    // 1.0 reject back faces, 0.0 accept both sides
 uniform float uMinMaskAlpha;
 uniform float uMinFacing;        // reject texels seen more grazingly than this cos
 uniform vec3  uGain;             // per-view per-channel Brown-Lowe gain (1,1,1 = identity)
+uniform sampler2D uEdgeSeed;     // JFA nearest-silhouette-pixel field in projector space
+uniform vec2  uEdgeSize;         // its size in pixels
+uniform float uEdgePx;           // fade width in edge-field pixels (0 = no fade)
+uniform float uOutputFade;       // 1.0 = write vec4(edgeFade, 1, 0, 1) instead of colour
 
 out vec4 outColor;
 
@@ -296,14 +311,47 @@ void main() {
   float alpha = src.a * maskA;
   if (alpha <= uMinMaskAlpha) discard;
 
+  // Silhouette-edge fade: distance (in projector pixels) from where this texel lands
+  // to the nearest silhouette pixel of the mesh in this view, smoothstepped over
+  // uEdgePx.
+  float edgeFade = 1.0;
+  if (uEdgePx > 0.0) {
+    // The silhouette comes from a rasterised depth map, so it is a pixel staircase
+    // and the distance to it wobbles by ~half a pixel along a smooth rim — comb
+    // streaks wherever a later view takes the rim over. Measure from the sub-pixel
+    // position (not the whole pixel) and average a 3x3 neighbourhood to iron the
+    // staircase out. A pixel with no seed in range is interior (fade 1).
+    vec2 p = sUV * uEdgeSize - 0.5;
+    float sum = 0.0;
+    for (int dy = -1; dy <= 1; dy++) {
+      for (int dx = -1; dx <= 1; dx++) {
+        vec2 q = p + vec2(float(dx), float(dy));
+        vec4 seed = texture(uEdgeSeed, (q + 0.5) / uEdgeSize);
+        float t = seed.w > 0.5 ? clamp(distance(q, seed.xy) / uEdgePx, 0.0, 1.0) : 1.0;
+        sum += t * t * (3.0 - 2.0 * t);
+      }
+    }
+    edgeFade = sum / 9.0;
+  }
+
   // Steep cosine weight is the seam-collapsing primary weight.
   float w = pow(facing, uAlpha) * uViewWeight * alpha;
   if (w <= 0.0) discard;
+  // The fade must lower the weight WITHOUT uncovering anything: a grazing rim texel
+  // already sits near ACCUM_EPS, and fading it below that (coverage is acc.a > eps)
+  // would punch holes along every silhouette. Anything covered stays covered, at a
+  // weight that loses to any real sample from another view.
+  if (w > ACCUM_EPS) w = max(w * edgeFade, 2.0 * ACCUM_EPS);
 
+  if (uOutputFade > 0.5) {
+    outColor = vec4(edgeFade, 1.0, 0.0, 1.0);
+    return;
+  }
   vec3 rgb = clamp(src.rgb * uGain, 0.0, 8.0);
   outColor = vec4(rgb * w, w);   // Σ(c·w), Σ(w)
 }
 `.replace(/SUV_EDGE_EPS/g, SUV_EDGE_EPS.toFixed(5))
+  .replace(/ACCUM_EPS/g, ACCUM_EPS.toExponential())
 
 // Full-screen add: dst = a + b
 const ADD_FRAG = /* glsl */`
@@ -399,6 +447,61 @@ void main() {
   vec2 seedUv = (seed.xy + 0.5) / uSize;
   vec3 rgb = texture2D(uColor, seedUv).rgb;
   gl_FragColor = vec4(rgb, 1.0);
+}
+`
+
+// Silhouette seeds for the edge fade, in PROJECTOR space (one pixel per depth-map
+// pixel). A pixel seeds when it is background (nothing drawn: depth stays at the
+// cleared 1.0) or when it sits on an occlusion edge. The JFA then gives every
+// surface pixel its nearest seed, so the bake shader reads "how far inside this
+// view's silhouette am I".
+//
+// Occlusion edge = a step to a 4-neighbour of more than uJump in LINEAR depth that is
+// also several times the steps on either side of it. A size threshold alone fires
+// all along a steep-but-continuous surface (a sphere's rim climbs fast near the
+// tangent), and it fires irregularly with the pixel phase, which showed as banding
+// across the whole rim. A real occlusion is an isolated step; a slope is not. Where
+// either flanking pixel is background, the background seed already covers it.
+const EDGE_SEED_FRAG = /* glsl */`
+precision highp float;
+varying vec2 vUv;
+uniform sampler2D uDepthMap;
+uniform vec2 uSize;
+uniform float uNear;
+uniform float uFar;
+uniform float uOrtho;
+uniform float uJump;   // linear-depth step that counts as an edge (0 = off)
+const float BG = 0.99999;
+const float ISOLATION = 4.0;   // a step this many times its flanks is an occlusion
+float linearDepth(float d) {
+  if (uOrtho > 0.5) return uNear + d * (uFar - uNear);
+  return (uNear * uFar) / max(uFar - d * (uFar - uNear), 1e-6);
+}
+// Raw depth at a pixel, or 1.0 (background) outside the map.
+float depthAt(vec2 p) {
+  if (p.x < 0.0 || p.y < 0.0 || p.x >= uSize.x || p.y >= uSize.y) return 1.0;
+  return texture2D(uDepthMap, (p + 0.5) / uSize).r;
+}
+void main() {
+  vec2 px = floor(vUv * uSize);
+  float d = texture2D(uDepthMap, vUv).r;
+  bool seed = d >= BG;
+  if (!seed && uJump > 0.0) {
+    float z = linearDepth(d);
+    for (int k = 0; k < 4; k++) {
+      vec2 off = k == 0 ? vec2(1.0, 0.0) : k == 1 ? vec2(-1.0, 0.0) : k == 2 ? vec2(0.0, 1.0) : vec2(0.0, -1.0);
+      float dn = depthAt(px + off);
+      float db = depthAt(px - off);
+      float dn2 = depthAt(px + 2.0 * off);
+      if (dn >= BG || db >= BG || dn2 >= BG) continue;
+      float zn = linearDepth(dn);
+      float step = abs(zn - z);
+      float flank = max(abs(z - linearDepth(db)), abs(linearDepth(dn2) - zn));
+      if (step > uJump && step > ISOLATION * flank) { seed = true; break; }
+    }
+  }
+  if (seed) gl_FragColor = vec4(px, 0.0, 1.0);
+  else gl_FragColor = vec4(-1.0, -1.0, 0.0, 0.0);
 }
 `
 
@@ -550,7 +653,11 @@ function getBakeMaterial() {
         uCullBackfaces: { value: 1 },
         uMinMaskAlpha: { value: 0.02 },
         uMinFacing: { value: 0 },
-        uGain: { value: new THREE.Vector3(1, 1, 1) }
+        uGain: { value: new THREE.Vector3(1, 1, 1) },
+        uEdgeSeed: { value: null },
+        uEdgeSize: { value: new THREE.Vector2(1, 1) },
+        uEdgePx: { value: 0 },
+        uOutputFade: { value: 0 }
       }
     })
   }
@@ -581,6 +688,7 @@ const statsRef = {}
 const jfaInitRef = {}
 const jfaStepRef = {}
 const jfaApplyRef = {}
+const edgeSeedRef = {}
 
 // ── Passes ────────────────────────────────────────────────────────────────────
 function runDepthPrepass(renderer, depthRt, meshes, camera) {
@@ -591,6 +699,12 @@ function runDepthPrepass(renderer, depthRt, meshes, camera) {
     if (!mesh?.geometry) return
     const proxy = new THREE.Mesh(mesh.geometry, mat)
     proxy.matrixAutoUpdate = false
+    // The world transform must go in `matrix`, not only `matrixWorld`: render() runs
+    // scene.updateMatrixWorld(), which recomputes every child's matrixWorld from its
+    // local matrix (identity here) and drew every mesh UNTRANSFORMED into the depth
+    // map. The colour bake was unaffected (it takes uModel from a closure), so any
+    // mesh with a node transform got an occlusion test against the wrong depth.
+    proxy.matrix.copy(mesh.matrixWorld)
     proxy.matrixWorld.copy(mesh.matrixWorld)
     proxy.frustumCulled = false
     scene.add(proxy)
@@ -656,6 +770,13 @@ function bakeViewIntoTemp(renderer, temp, bakeGeoms, camera, depthTexture, viewT
   else if (g && typeof g === 'object' && 'x' in g) u.uGain.value.copy(g)
   else if (typeof g === 'number') u.uGain.value.set(g, g, g)
   else u.uGain.value.set(1, 1, 1)
+  // The material is shared across views and calls, so the edge field must be set
+  // (or cleared) every time, never left over from the previous view.
+  const edge = opts.edgeField
+  u.uEdgeSeed.value = edge?.texture || null
+  u.uEdgePx.value = edge ? edge.fadePx : 0
+  u.uEdgeSize.value.set(edge?.width || 1, edge?.height || 1)
+  u.uOutputFade.value = opts.outputFade ? 1 : 0
 
   const scene = new THREE.Scene()
   const proxies = []
@@ -720,6 +841,59 @@ function statsInto(renderer, dst, accumTex) {
 // `maxDist` texels past the chart border (gutter / mip-bleed fix). Only coverage
 // whose accumulated weight exceeds `seedMin` seeds the fill, so a view's grazing
 // garbage does not bleed its matte edge into the gutters.
+// Jump-flood steps from `startStep` down to 1. `seedA` holds the initial seeds;
+// returns the pair with the result in `seedA`.
+function runJfaSteps(renderer, seedA, seedB, size, startStep) {
+  const stepMat = getFullScreenMaterial(jfaStepRef, JFA_STEP_FRAG, {
+    uSeed: { value: null }, uSize: { value: new THREE.Vector2() }, uStep: { value: 1 }
+  })
+  let step = startStep
+  while (step >= 1) {
+    stepMat.uniforms.uSeed.value = seedA.texture
+    stepMat.uniforms.uSize.value.copy(size)
+    stepMat.uniforms.uStep.value = step
+    runFullScreenPass(renderer, seedB, stepMat)
+    const t = seedA; seedA = seedB; seedB = t
+    step = Math.floor(step / 2)
+  }
+  return { seedA, seedB }
+}
+
+// Nearest-silhouette field for one view, from its depth pre-pass. Only distances up
+// to `fadePx` matter (past that the fade is 1), so the flood starts at the power of
+// two covering it instead of at the full image size — a handful of passes.
+// Returns { target, texture, width, height, fadePx } or null when the fade is off;
+// the caller disposes `target`.
+function computeEdgeField(renderer, depthRt, camera, { fadePx, depthJump }) {
+  if (!(fadePx > 0)) return null
+  const width = depthRt.width
+  const height = depthRt.height
+  const size = new THREE.Vector2(width, height)
+  let seedA = makeFloatTarget(width, height, { type: THREE.FloatType })
+  let seedB = makeFloatTarget(width, height, { type: THREE.FloatType })
+  const initMat = getFullScreenMaterial(edgeSeedRef, EDGE_SEED_FRAG, {
+    uDepthMap: { value: null }, uSize: { value: new THREE.Vector2() },
+    uNear: { value: 0.1 }, uFar: { value: 100 }, uOrtho: { value: 0 }, uJump: { value: 0 }
+  })
+  initMat.uniforms.uDepthMap.value = depthRt.depthTexture
+  initMat.uniforms.uSize.value.copy(size)
+  initMat.uniforms.uNear.value = camera.near ?? 0.1
+  initMat.uniforms.uFar.value = camera.far ?? 100
+  initMat.uniforms.uOrtho.value = camera.isOrthographicCamera ? 1 : 0
+  initMat.uniforms.uJump.value = Math.max(0, depthJump || 0)
+  runFullScreenPass(renderer, seedA, initMat)
+  const startStep = Math.pow(2, Math.ceil(Math.log2(Math.max(1, fadePx))))
+  ;({ seedA, seedB } = runJfaSteps(renderer, seedA, seedB, size, startStep))
+  seedB.dispose()
+  return { target: seedA, texture: seedA.texture, width, height, fadePx }
+}
+
+// Fade width in edge-field (depth-map) pixels for a fade given in source-image pixels.
+function edgeFadeInDepthPx(edgeFadePx, depthWidth, imageWidth) {
+  if (!(edgeFadePx > 0)) return 0
+  return edgeFadePx * (imageWidth > 0 ? depthWidth / imageWidth : 1)
+}
+
 function jfaDilate(renderer, width, height, colorTex, accumTex, maxDist, seedMin = ACCUM_EPS) {
   const size = new THREE.Vector2(width, height)
   let seedA = makeFloatTarget(width, height, { type: THREE.FloatType })
@@ -733,18 +907,8 @@ function jfaDilate(renderer, width, height, colorTex, accumTex, maxDist, seedMin
   initMat.uniforms.uSeedMin.value = seedMin
   runFullScreenPass(renderer, seedA, initMat)
 
-  const stepMat = getFullScreenMaterial(jfaStepRef, JFA_STEP_FRAG, {
-    uSeed: { value: null }, uSize: { value: new THREE.Vector2() }, uStep: { value: 1 }
-  })
-  let step = Math.pow(2, Math.ceil(Math.log2(Math.max(width, height)))) / 2
-  while (step >= 1) {
-    stepMat.uniforms.uSeed.value = seedA.texture
-    stepMat.uniforms.uSize.value.copy(size)
-    stepMat.uniforms.uStep.value = step
-    runFullScreenPass(renderer, seedB, stepMat)
-    const t = seedA; seedA = seedB; seedB = t
-    step = Math.floor(step / 2)
-  }
+  ;({ seedA, seedB } = runJfaSteps(renderer, seedA, seedB, size,
+    Math.pow(2, Math.ceil(Math.log2(Math.max(width, height)))) / 2))
 
   const out = makeByteTarget(width, height)
   const applyMat = getFullScreenMaterial(jfaApplyRef, JFA_APPLY_FRAG, {
@@ -1013,7 +1177,12 @@ export async function bakeViewToTextureGPU(params) {
     // Gutter padding to stop white UV-seam bleed under display-time filtering.
     // Small by design: a large radius would bleed one island's colour across a
     // thin gutter into its neighbour.
-    dilatePixels = 4
+    dilatePixels = 4,
+    // Silhouette-edge fade width in source-image pixels (0 = off), and the
+    // occlusion-edge depth step as a fraction of the mesh diameter (0 = outer
+    // silhouette only). See DEFAULT_EDGE_FADE_PX.
+    edgeFadePx = DEFAULT_EDGE_FADE_PX,
+    edgeDepthJump = DEFAULT_EDGE_DEPTH_JUMP
   } = params
 
   if (!camera || !viewImage || !textureWidth || !textureHeight) return null
@@ -1053,23 +1222,45 @@ export async function bakeViewToTextureGPU(params) {
 
   let occlusionModeUsed = 'none'
   let dilatedRt = null
+  let edgeField = null
   try {
     runDepthPrepass(renderer, depthRt, meshList, pcam)
     occlusionModeUsed = 'depth-prepass'
+    edgeField = computeEdgeField(renderer, depthRt, pcam, {
+      fadePx: edgeFadeInDepthPx(edgeFadePx, dW, imgW),
+      depthJump: edgeDepthJump * 2 * (sceneSphere?.radius || 0)
+    })
+    const bakeOpts = {
+      alpha, viewWeight: viewOpacity, minBias, maxBias, cullBackfaces, minMaskAlpha, minFacing, gain: 1, edgeField
+    }
 
     // Single view → the temp target already holds Σ(rgb*w, w) for this view
     // (NoBlending, one fragment per texel). No cross-view accumulation is needed,
     // so resolve directly from it. (The previous addInto(accum, temp, accum) read
     // and wrote the same target — a framebuffer feedback loop that zeroed the
     // result on real GPUs, which is why nothing appeared on the mesh.)
-    bakeViewIntoTemp(renderer, temp, bakeGeoms, pcam, depthRt.depthTexture, viewTex, maskTex, {
-      alpha, viewWeight: viewOpacity, minBias, maxBias, cullBackfaces, minMaskAlpha, minFacing, gain: 1
-    })
+    bakeViewIntoTemp(renderer, temp, bakeGeoms, pcam, depthRt.depthTexture, viewTex, maskTex, bakeOpts)
 
     resolveInto(renderer, resolved, temp.texture)
     statsInto(renderer, stats, temp.texture)
     const { coverageMask: coreCoverage, confidenceMap: coreConfidence, coveredTexels } =
       readStats(renderer, stats, textureWidth, textureHeight)
+
+    // The fade on its own, per texel, for the layer composite: confidence mixes it
+    // with the cosine, but only the fade says "this is the rim of the view" — the
+    // band a later, better view is allowed to take over. Same shader and discards
+    // as the colour pass, so it covers exactly the core texels. Texels it does not
+    // reach (dilation pad, uncovered) read 1 = no rim, i.e. today's behaviour.
+    let edgeFadeMap = null
+    if (edgeField) {
+      bakeViewIntoTemp(renderer, stats, bakeGeoms, pcam, depthRt.depthTexture, viewTex, maskTex, { ...bakeOpts, outputFade: true })
+      const fadeBuf = new Uint8Array(textureWidth * textureHeight * 4)
+      renderer.readRenderTargetPixels(stats, 0, 0, textureWidth, textureHeight, fadeBuf)
+      edgeFadeMap = new Float32Array(textureWidth * textureHeight)
+      for (let i = 0; i < edgeFadeMap.length; i += 1) {
+        edgeFadeMap[i] = fadeBuf[i * 4 + 1] > 127 ? fadeBuf[i * 4] / 255 : 1
+      }
+    }
 
     // Gutter dilation: pad the covered colour a few texels past each UV-island
     // border so display-time bilinear/mip filtering does not pull the (often white)
@@ -1137,6 +1328,7 @@ export async function bakeViewToTextureGPU(params) {
       canvas,
       coverageMask,
       confidenceMap,
+      edgeFadeMap,
       uvOccupancyMask,
       coveredTexels,
       occlusionModeUsed,
@@ -1151,6 +1343,7 @@ export async function bakeViewToTextureGPU(params) {
     depthRt.dispose()
     temp.dispose(); resolved.dispose(); stats.dispose()
     dilatedRt?.dispose?.()
+    edgeField?.target.dispose()
     viewTex.dispose(); maskTex?.dispose?.()
   }
 }
@@ -1291,7 +1484,9 @@ export async function bakeMultiViewTextureGPU(params) {
     minFacing = 0,
     minBias = DEFAULT_MIN_BIAS, maxBias = DEFAULT_MAX_BIAS,
     depthResolution = null, flipOutputY = false,
-    onProgress = null
+    onProgress = null,
+    edgeFadePx = DEFAULT_EDGE_FADE_PX,
+    edgeDepthJump = DEFAULT_EDGE_DEPTH_JUMP
   } = params
 
   if (!views.length || !textureWidth || !textureHeight) return null
@@ -1334,6 +1529,22 @@ export async function bakeMultiViewTextureGPU(params) {
   const viewTextures = views.map(v => makeSourceTexture(v.image))
   const maskTextures = views.map(v => (v.mask ? makeSourceTexture(v.mask) : null))
 
+  // Depth pre-pass + silhouette-edge field + UV bake of view i into `temp`.
+  const bakeOneView = (i, cam, gain) => {
+    runDepthPrepass(renderer, depthRt, meshList, cam)
+    const edgeField = computeEdgeField(renderer, depthRt, cam, {
+      fadePx: edgeFadeInDepthPx(edgeFadePx, dW, imageSize(views[i].image).w),
+      depthJump: edgeDepthJump * 2 * (sceneSphere?.radius || 0)
+    })
+    try {
+      bakeViewIntoTemp(renderer, temp, bakeGeoms, cam, depthRt.depthTexture, viewTextures[i], maskTextures[i], {
+        alpha, viewWeight: views[i].opacity ?? 1, minBias, maxBias, cullBackfaces, minMaskAlpha, minFacing, gain, edgeField
+      })
+    } finally {
+      edgeField?.target.dispose()
+    }
+  }
+
   // Optional gain pre-solve: bake each view to its own resolved canvas, read it
   // back, solve Brown–Lowe gains, then accumulate with gains applied.
   let gains = views.map(() => [1, 1, 1])
@@ -1345,10 +1556,7 @@ export async function bakeMultiViewTextureGPU(params) {
       for (let i = 0; i < views.length; i += 1) {
         views[i].camera.updateMatrixWorld?.(true); views[i].camera.updateProjectionMatrix?.()
         const cam = fittedProjector(views[i].camera, sceneSphere)
-        runDepthPrepass(renderer, depthRt, meshList, cam)
-        bakeViewIntoTemp(renderer, temp, bakeGeoms, cam, depthRt.depthTexture, viewTextures[i], maskTextures[i], {
-          alpha, viewWeight: views[i].opacity ?? 1, minBias, maxBias, cullBackfaces, minMaskAlpha, minFacing, gain: 1
-        })
+        bakeOneView(i, cam, 1)
         resolveInto(renderer, resolved, temp.texture)
         statsInto(renderer, stats, temp.texture)
         const buf = new Uint8Array(textureWidth * textureHeight * 4)
@@ -1371,11 +1579,8 @@ export async function bakeMultiViewTextureGPU(params) {
     for (let i = 0; i < views.length; i += 1) {
       views[i].camera.updateMatrixWorld?.(true); views[i].camera.updateProjectionMatrix?.()
       const cam = fittedProjector(views[i].camera, sceneSphere)
-      runDepthPrepass(renderer, depthRt, meshList, cam)
-      bakeViewIntoTemp(renderer, temp, bakeGeoms, cam, depthRt.depthTexture, viewTextures[i], maskTextures[i], {
-        alpha, viewWeight: views[i].opacity ?? 1, minBias, maxBias, cullBackfaces, minMaskAlpha, minFacing,
-        gain: gains[i] // per-channel Brown–Lowe gain ([r,g,b]); identity when compensation is off
-      })
+      // per-channel Brown–Lowe gain ([r,g,b]); identity when compensation is off
+      bakeOneView(i, cam, gains[i])
       addInto(renderer, other, cur.texture, temp.texture)
       const t = cur; cur = other; other = t
       onProgress?.((i + 1) / views.length)
@@ -1429,5 +1634,5 @@ export function disposeGpuBakeResources() {
   sharedQuadCamera = null
   sharedQuadMesh = null
   depthMaterial = bakeMaterial = null
-  addRef.mat = resolveRef.mat = statsRef.mat = jfaInitRef.mat = jfaStepRef.mat = jfaApplyRef.mat = null
+  addRef.mat = resolveRef.mat = statsRef.mat = jfaInitRef.mat = jfaStepRef.mat = jfaApplyRef.mat = edgeSeedRef.mat = null
 }

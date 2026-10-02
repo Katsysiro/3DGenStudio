@@ -3446,6 +3446,7 @@ export default function MeshEditorPage() {
         ownershipMask: layerData.ownershipMask,
         sharedSeamMask: layerData.sharedSeamMask,
         confidenceMap: layerData.confidenceMap,
+        edgeFadeMap: layerData.edgeFadeMap || null,
         opacity,
         opacitySeams: Math.max(0, Math.min(1, Number(layer.opacitySeams ?? 1))),
         blendMode: layer.blendMode || 'source-over',
@@ -9805,7 +9806,7 @@ export default function MeshEditorPage() {
           // cullBackfaces / minFacing / bias change, so cached layer bakes are
           // invalidated and re-baked with the new visibility rules (otherwise a
           // re-apply silently reuses the stale canvas).
-          `occl:v3-cull-occ`
+          `occl:v4-edge-fade`
         ].join('|')
 
         const requiresRebake = (
@@ -9879,6 +9880,7 @@ export default function MeshEditorPage() {
                 layerData.ownershipMask = ownershipMask
                 layerData.sharedSeamMask = sharedSeamMask
                 layerData.confidenceMap = gpu.confidenceMap
+                layerData.edgeFadeMap = gpu.edgeFadeMap || null
                 if (gpu.uvOccupancyMask && gpu.uvOccupancyMask.length === texW * texH) {
                   projectionUvOccupancyRef.current = gpu.uvOccupancyMask
                 }
@@ -9996,6 +9998,7 @@ export default function MeshEditorPage() {
           layerData.ownershipMask = ownershipMask
           layerData.sharedSeamMask = sharedSeamMask
           layerData.confidenceMap = confidenceMap
+          layerData.edgeFadeMap = null // the CPU bake has no silhouette-edge fade
           }
         }
 
@@ -10021,6 +10024,7 @@ export default function MeshEditorPage() {
             ownershipMask: layerOwnership,
             sharedSeamMask: layerSharedSeam,
             confidenceMap: layerConfidence,
+            edgeFadeMap: layerData.edgeFadeMap || null,
             opacity: layerOpacity,
             opacitySeams: layerOpacitySeams,
             blendMode: layerBlendMode,
