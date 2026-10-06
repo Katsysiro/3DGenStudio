@@ -28,6 +28,18 @@ const PRESETS = [
 
 const CHANGE_LOG_ENTRIES = [
   {
+    version: 'v3.5.3',
+    date: '2026-10-06',
+    items: [
+			'Batch Project: Added Stage Actions "AutoUV","Transfer Rig","Flatten to Albedo"',
+			'SetupWizard: Added UltraTex',
+			'Desktop App: Can use services from a remote computer',
+			'Bake: Fixed bugs',
+			'MeshEditor: Improved Projection',
+			'ComfyUI: Updated ComfyUI, nodes and workflows'
+    ]
+  },
+  {
     version: 'v3.5.2',
     date: '2026-09-27',
     items: [

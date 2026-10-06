@@ -29,6 +29,7 @@
 !pgEmbedded.js
 !db/
 !version.json
+!meshNormals.js
 
 # mcp/ is imported statically by server.js, so it must resolve even though the
 # /mcp route is not mounted in server mode.
