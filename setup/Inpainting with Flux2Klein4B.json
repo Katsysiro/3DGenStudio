@@ -20,6 +20,7 @@
   "30": {
     "inputs": {
       "shift": 3.1,
+      "sampling": "flow",
       "model": [
         "160",
         0
@@ -390,6 +391,7 @@
       "mask_offset": 0,
       "invert_output": false,
       "refine_foreground": false,
+      "unload_model": true,
       "background": "Alpha",
       "background_color": "#222222",
       "image": [

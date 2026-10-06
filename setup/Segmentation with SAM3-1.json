@@ -11,7 +11,7 @@
   "180": {
     "inputs": {
       "mask": [
-        "164:75",
+        "164_75",
         0
       ]
     },
@@ -41,7 +41,7 @@
       "padding": 0,
       "remove_background": false,
       "max_size": 2048,
-			"square": true,
+      "square": true,
       "image": [
         "256",
         0
@@ -76,7 +76,7 @@
       "title": "🔧 Image Batch To List"
     }
   },
-  "164:77": {
+  "164_77": {
     "inputs": {
       "ckpt_name": "sam3.1_multiplex_fp16.safetensors"
     },
@@ -85,11 +85,11 @@
       "title": "Load Checkpoint"
     }
   },
-  "164:78": {
+  "164_78": {
     "inputs": {
       "text": "Head, hat, clothes, hand, boots, belt",
       "clip": [
-        "164:77",
+        "164_77",
         1
       ]
     },
@@ -98,13 +98,13 @@
       "title": "CLIP Text Encode (Prompt)"
     }
   },
-  "164:75": {
+  "164_75": {
     "inputs": {
       "threshold": 0.1,
       "refine_iterations": 3,
       "individual_masks": true,
       "model": [
-        "164:77",
+        "164_77",
         0
       ],
       "image": [
@@ -112,7 +112,7 @@
         0
       ],
       "conditioning": [
-        "164:78",
+        "164_78",
         0
       ]
     },

@@ -67,6 +67,7 @@
   "30": {
     "inputs": {
       "shift": 3.1,
+      "sampling": "flow",
       "model": [
         "24",
         0

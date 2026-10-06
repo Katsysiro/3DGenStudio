@@ -84,7 +84,7 @@
   "71": {
     "inputs": {
       "images": [
-        "8:19",
+        "8_19",
         0
       ]
     },
@@ -107,7 +107,7 @@
       "title": "Load LoRA"
     }
   },
-  "8:16": {
+  "8_16": {
     "inputs": {
       "sampler_name": "euler"
     },
@@ -116,7 +116,23 @@
       "title": "KSamplerSelect"
     }
   },
-  "8:17": {
+  "20_12_78": {
+    "inputs": {
+      "pixels": [
+        "1",
+        0
+      ],
+      "vae": [
+        "4",
+        0
+      ]
+    },
+    "class_type": "VAEEncode",
+    "_meta": {
+      "title": "VAE Encode"
+    }
+  },
+  "8_17": {
     "inputs": {
       "steps": 4,
       "width": [
@@ -133,7 +149,7 @@
       "title": "Flux2Scheduler"
     }
   },
-  "8:18": {
+  "8_18": {
     "inputs": {
       "width": [
         "66",
@@ -150,30 +166,14 @@
       "title": "Empty Flux 2 Latent"
     }
   },
-  "20:12:78": {
-    "inputs": {
-      "pixels": [
-        "1",
-        0
-      ],
-      "vae": [
-        "4",
-        0
-      ]
-    },
-    "class_type": "VAEEncode",
-    "_meta": {
-      "title": "VAE Encode"
-    }
-  },
-  "20:12:76": {
+  "20_12_76": {
     "inputs": {
       "conditioning": [
         "6",
         0
       ],
       "latent": [
-        "20:12:78",
+        "20_12_78",
         0
       ]
     },
@@ -182,14 +182,14 @@
       "title": "ReferenceLatent"
     }
   },
-  "20:12:77": {
+  "20_12_77": {
     "inputs": {
       "conditioning": [
         "22",
         0
       ],
       "latent": [
-        "20:12:78",
+        "20_12_78",
         0
       ]
     },
@@ -198,7 +198,7 @@
       "title": "ReferenceLatent"
     }
   },
-  "8:15": {
+  "8_15": {
     "inputs": {
       "cfg": 1,
       "model": [
@@ -206,11 +206,11 @@
         0
       ],
       "positive": [
-        "20:12:76",
+        "20_12_76",
         0
       ],
       "negative": [
-        "20:12:77",
+        "20_12_77",
         0
       ]
     },
@@ -219,26 +219,26 @@
       "title": "CFGGuider"
     }
   },
-  "8:20": {
+  "8_20": {
     "inputs": {
       "noise": [
         "7",
         0
       ],
       "guider": [
-        "8:15",
+        "8_15",
         0
       ],
       "sampler": [
-        "8:16",
+        "8_16",
         0
       ],
       "sigmas": [
-        "8:17",
+        "8_17",
         0
       ],
       "latent_image": [
-        "8:18",
+        "8_18",
         0
       ]
     },
@@ -247,10 +247,10 @@
       "title": "SamplerCustomAdvanced"
     }
   },
-  "8:19": {
+  "8_19": {
     "inputs": {
       "samples": [
-        "8:20",
+        "8_20",
         0
       ],
       "vae": [

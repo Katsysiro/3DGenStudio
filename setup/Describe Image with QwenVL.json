@@ -7,7 +7,7 @@
       "preset_prompt": "🖼️ Detailed Description",
       "custom_prompt": "",
       "max_tokens": 512,
-      "keep_model_loaded": true,
+      "keep_model_loaded": false,
       "seed": 1,
       "image": [
         "2",

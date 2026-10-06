@@ -434,10 +434,10 @@
 					"Name": "Gen Image with Z Image Turbo",
 					"File": "setup/Gen Image with ZImageTurbo.json",
 					"Inputs": [
-						{ "Node": "34:27", "Input": "text",  "Name": "Prompt", "Type": "String" },
-						{ "Node": "34:3",  "Input": "seed",  "Name": "Seed",   "Type": "Number" },
-						{ "Node": "34:3",  "Input": "steps", "Name": "Steps",  "Type": "Number" },
-						{ "Node": "34:13",  "Input": "batch_size", "Name": "Number of Images to Generate",  "Type": "Number" }
+						{ "Node": "34_27", "Input": "text",  "Name": "Prompt", "Type": "String" },
+						{ "Node": "34_3",  "Input": "seed",  "Name": "Seed",   "Type": "Number" },
+						{ "Node": "34_3",  "Input": "steps", "Name": "Steps",  "Type": "Number" },
+						{ "Node": "34_13",  "Input": "batch_size", "Name": "Number of Images to Generate",  "Type": "Number" }
 					],
 					"Outputs": [
 						{ "Node": "45", "Name": "Save Image", "Type": "Image" }
@@ -469,9 +469,9 @@
 					"Inputs": [
 						{ "Node": "6", "Input": "text",  "Name": "Prompt", "Type": "String" },
 						{ "Node": "7",  "Input": "noise_seed",  "Name": "Seed",   "Type": "Number" },
-						{ "Node": "8:17",  "Input": "steps", "Name": "Steps",  "Type": "Number" },
+						{ "Node": "8_17",  "Input": "steps", "Name": "Steps",  "Type": "Number" },
 						{ "Node": "65",  "Input": "value", "Name": "Image Resolution",  "Type": "Number" },
-						{ "Node": "8:18",  "Input": "batch_size", "Name": "Number of Images to Generate",  "Type": "Number" }
+						{ "Node": "8_18",  "Input": "batch_size", "Name": "Number of Images to Generate",  "Type": "Number" }
 					],
 					"Outputs": [
 						{ "Node": "66", "Name": "Save Image", "Type": "Image" }
@@ -547,9 +547,9 @@
 					"Inputs": [
 						{ "Node": "6", "Input": "text",  "Name": "Prompt", "Type": "String" },
 						{ "Node": "7",  "Input": "noise_seed",  "Name": "Seed",   "Type": "Number" },
-						{ "Node": "8:17",  "Input": "steps", "Name": "Steps",  "Type": "Number" },
+						{ "Node": "8_17",  "Input": "steps", "Name": "Steps",  "Type": "Number" },
 						{ "Node": "65",  "Input": "value", "Name": "Image Resolution",  "Type": "Number" },
-						{ "Node": "8:18",  "Input": "batch_size", "Name": "Number of Images to Generate",  "Type": "Number" }
+						{ "Node": "8_18",  "Input": "batch_size", "Name": "Number of Images to Generate",  "Type": "Number" }
 					],
 					"Outputs": [
 						{ "Node": "66", "Name": "Save Image", "Type": "Image" }
@@ -732,7 +732,7 @@
 					"File": "setup/Segmentation with SAM3-1.json",
 					"Inputs": [
 						{ "Node": "163", "Input": "image",  "Name": "Source Image", "Type": "Image" },
-						{ "Node": "164:78", "Input": "text",  "Name": "Prompt", "Type": "String" },
+						{ "Node": "164_78", "Input": "text",  "Name": "Prompt", "Type": "String" },
 						{ "Node": "251", "Input": "square",  "Name": "Square Image", "Type": "Boolean" }
 					],
 					"Outputs": [
@@ -849,7 +849,8 @@
 			"Inputs": [
 				{ "Node": "1", "Input": "image",  "Name": "Source Image", "Type": "Image" },
 				{ "Node": "2",  "Input": "mask_offset",  "Name": "Mask Offset",   "Type": "Number" },
-				{ "Node": "2",  "Input": "mask_blur",  "Name": "Mask Blur",   "Type": "Number" }
+				{ "Node": "2",  "Input": "mask_blur",  "Name": "Mask Blur",   "Type": "Number" },
+				{ "Node": "2",  "Input": "unload_model",  "Name": "Unload Model",   "Type": "Boolean" }
 			],
 			"Outputs": [
 				{ "Node": "4", "Name": "Save Image", "Type": "Image" }
@@ -988,7 +989,8 @@
 			"Inputs": [
 				{ "Node": "5", "Input": "image",  "Name": "Source Image", "Type": "Image" },
 				{ "Node": "8",  "Input": "padding",  "Name": "Padding",   "Type": "Number" },
-				{ "Node": "8",  "Input": "square",  "Name": "Make Square Image",   "Type": "Boolean" }
+				{ "Node": "8",  "Input": "square",  "Name": "Make Square Image",   "Type": "Boolean" },
+				{ "Node": "6",  "Input": "unload_model",  "Name": "Unload Model",   "Type": "Boolean" }
 			],
 			"Outputs": [
 				{ "Node": "7", "Name": "Save Image", "Type": "Image" }
@@ -1040,7 +1042,8 @@
 				{ "Node": "1", "Input": "image",  "Name": "Source Image", "Type": "Image" },
 				{ "Node": "23",  "Input": "model",  "Name": "Model",   "Type": "String", "Enums":["BiRefNet-general","BiRefNet_512x512","BiRefNet-HR","BiRefNet-portrait","BiRefNet-matting","BiRefNet-HR-matting","BiRefNet_lite","BiRefNet_lite-2K","BiRefNet_dynamic","BiRefNet_lite-matting","BiRefNet_toonout","Lucida"] },
 				{ "Node": "23",  "Input": "mask_offset",  "Name": "Mask Offset",   "Type": "Number" },
-				{ "Node": "23",  "Input": "mask_blur",  "Name": "Mask Blur",   "Type": "Number" }				
+				{ "Node": "23",  "Input": "mask_blur",  "Name": "Mask Blur",   "Type": "Number" },
+				{ "Node": "23",  "Input": "unload_model",  "Name": "Unload Model",   "Type": "Boolean" }
 			],
 			"Outputs": [
 				{ "Node": "25", "Name": "Save Image", "Type": "Image" }

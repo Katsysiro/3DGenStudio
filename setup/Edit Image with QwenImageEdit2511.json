@@ -2,6 +2,7 @@
   "139": {
     "inputs": {
       "shift": 3.1,
+      "sampling": "flow",
       "model": [
         "152",
         0

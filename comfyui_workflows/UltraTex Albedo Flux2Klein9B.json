@@ -1,0 +1,261 @@
+{
+  "2": {
+    "inputs": {
+      "mesh_path": "",
+      "render_size": 4096,
+      "atlas_size": 4096,
+      "uv_mode": "comfy_gpu",
+      "reference_alignment": "fit_front_silhouette",
+      "mask_meaning": "background (LoadImage)",
+      "reference_image": [
+        "19",
+        0
+      ],
+      "reference_mask": [
+        "19",
+        1
+      ],
+      "trimesh": [
+        "22",
+        0
+      ]
+    },
+    "class_type": "UltraTexPrep",
+    "_meta": {
+      "title": "UltraTex Prep (mesh + reference)"
+    }
+  },
+  "5": {
+    "inputs": {
+      "unet_name": "flux-2-klein-base-9b-fp8.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "Load Diffusion Model"
+    }
+  },
+  "6": {
+    "inputs": {
+      "vae_name": "flux2-vae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Load VAE"
+    }
+  },
+  "7": {
+    "inputs": {
+      "lora_name": "ultratex_flux2.safetensors",
+      "strength": 1,
+      "model": [
+        "5",
+        0
+      ]
+    },
+    "class_type": "UltraTexLoraLoader",
+    "_meta": {
+      "title": "UltraTex Load LoRA"
+    }
+  },
+  "8": {
+    "inputs": {
+      "decoder_name": "ultratex_flux2_decoder.pt",
+      "vae": [
+        "6",
+        0
+      ]
+    },
+    "class_type": "UltraTexForegroundDecoder",
+    "_meta": {
+      "title": "UltraTex Foreground VAE Decoder"
+    }
+  },
+  "9": {
+    "inputs": {
+      "clip_name": "qwen_3_8b_fp8mixed.safetensors",
+      "type": "flux2",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "Load CLIP"
+    }
+  },
+  "10": {
+    "inputs": {
+      "text": "",
+      "clip": [
+        "9",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Prompt) Positive"
+    }
+  },
+  "11": {
+    "inputs": {
+      "text": "",
+      "clip": [
+        "9",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Prompt) Negative"
+    }
+  },
+  "15": {
+    "inputs": {
+      "viewport_state": {
+        "image": "",
+        "mask": "",
+        "normal": "",
+        "camera_info": {
+          "position": {
+            "x": 2.2764162184766135,
+            "y": 0.5411345898327593,
+            "z": 0.7797863181784089
+          },
+          "target": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "zoom": 1,
+          "cameraType": "perspective",
+          "quaternion": {
+            "x": -0.08980881997382195,
+            "y": 0.5777978453993589,
+            "z": 0.0641678001732407,
+            "w": 0.8086819641414634
+          },
+          "fov": 35,
+          "aspect": 1,
+          "near": 0.01,
+          "far": 10000,
+          "frustum": {
+            "left": -5,
+            "right": 5,
+            "top": 5,
+            "bottom": -5
+          }
+        },
+        "recording": "",
+        "model_3d_info": []
+      },
+      "width": 1024,
+      "height": 1024,
+      "model_3d": [
+        "32",
+        4
+      ]
+    },
+    "class_type": "Preview3DAdvanced",
+    "_meta": {
+      "title": "Preview 3D (Advanced)"
+    }
+  },
+  "19": {
+    "inputs": {
+      "image": "Image_1024_00176_.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "22": {
+    "inputs": {
+      "glb_path": "C:\\Git\\ComfyUI\\output\\3D\\Balloon_XViews\\Balloon_XViews_TexturedMesh_00001_.glb",
+      "only_vertices_and_faces": true
+    },
+    "class_type": "UltraTexLoadMesh",
+    "_meta": {
+      "title": "UltraText Load Mesh"
+    }
+  },
+  "24": {
+    "inputs": {
+      "filename_prefix": "UltraTex_Views",
+      "images": [
+        "25",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image"
+    }
+  },
+  "25": {
+    "inputs": {
+      "resolution": 1024,
+      "steps": 25,
+      "seed": 12345,
+      "guidance": 4,
+      "drop_background_tokens": true,
+      "memory_factor": 0,
+      "attention": "ultratex_sparse",
+      "sparse_topk": 0.2,
+      "token_chunk": 8192,
+      "denoise": 1,
+      "model": [
+        "7",
+        0
+      ],
+      "vae": [
+        "8",
+        0
+      ],
+      "positive": [
+        "10",
+        0
+      ],
+      "prep": [
+        "2",
+        0
+      ],
+      "negative": [
+        "11",
+        0
+      ]
+    },
+    "class_type": "UltraTexSampler",
+    "_meta": {
+      "title": "UltraTex Sampler"
+    }
+  },
+  "32": {
+    "inputs": {
+      "texture_size": 2048,
+      "filename_prefix": "Baloon_1024",
+      "view_weight_power": 4,
+      "best_view_mix": 0.5,
+      "edge_feather_px": 6,
+      "prep": [
+        "2",
+        0
+      ],
+      "albedo_views": [
+        "25",
+        0
+      ],
+      "prep_2": [
+        "2",
+        0
+      ],
+      "albedo_views_2": [
+        "25",
+        0
+      ]
+    },
+    "class_type": "UltraTexBake",
+    "_meta": {
+      "title": "UltraTex Bake Texture"
+    }
+  }
+}

@@ -11,7 +11,7 @@
   "45": {
     "inputs": {
       "images": [
-        "34:8",
+        "34_8",
         0
       ]
     },
@@ -20,7 +20,7 @@
       "title": "Preview Image"
     }
   },
-  "34:29": {
+  "34_29": {
     "inputs": {
       "vae_name": "ae.safetensors"
     },
@@ -29,7 +29,7 @@
       "title": "Load VAE"
     }
   },
-  "34:13": {
+  "34_13": {
     "inputs": {
       "width": 1024,
       "height": 1024,
@@ -40,7 +40,7 @@
       "title": "EmptySD3LatentImage"
     }
   },
-  "34:30": {
+  "34_30": {
     "inputs": {
       "clip_name": "qwen_3_4b_fp8_mixed.safetensors",
       "type": "lumina2",
@@ -51,11 +51,11 @@
       "title": "Load CLIP"
     }
   },
-  "34:27": {
+  "34_27": {
     "inputs": {
       "text": "",
       "clip": [
-        "34:30",
+        "34_30",
         0
       ]
     },
@@ -64,10 +64,10 @@
       "title": "CLIP Text Encode (Prompt)"
     }
   },
-  "34:33": {
+  "34_33": {
     "inputs": {
       "conditioning": [
-        "34:27",
+        "34_27",
         0
       ]
     },
@@ -76,7 +76,7 @@
       "title": "ConditioningZeroOut"
     }
   },
-  "34:3": {
+  "34_3": {
     "inputs": {
       "seed": 369851808028921,
       "steps": 10,
@@ -89,15 +89,15 @@
         0
       ],
       "positive": [
-        "34:27",
+        "34_27",
         0
       ],
       "negative": [
-        "34:33",
+        "34_33",
         0
       ],
       "latent_image": [
-        "34:13",
+        "34_13",
         0
       ]
     },
@@ -106,14 +106,14 @@
       "title": "KSampler"
     }
   },
-  "34:8": {
+  "34_8": {
     "inputs": {
       "samples": [
-        "34:3",
+        "34_3",
         0
       ],
       "vae": [
-        "34:29",
+        "34_29",
         0
       ]
     },

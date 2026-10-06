@@ -75,7 +75,7 @@
   "66": {
     "inputs": {
       "images": [
-        "8:19",
+        "8_19",
         0
       ]
     },
@@ -84,7 +84,7 @@
       "title": "Preview Image"
     }
   },
-  "8:16": {
+  "8_16": {
     "inputs": {
       "sampler_name": "euler"
     },
@@ -93,7 +93,7 @@
       "title": "KSamplerSelect"
     }
   },
-  "8:17": {
+  "8_17": {
     "inputs": {
       "steps": 4,
       "width": [
@@ -110,7 +110,7 @@
       "title": "Flux2Scheduler"
     }
   },
-  "8:18": {
+  "8_18": {
     "inputs": {
       "width": [
         "65",
@@ -127,7 +127,7 @@
       "title": "Empty Flux 2 Latent"
     }
   },
-  "8:15": {
+  "8_15": {
     "inputs": {
       "cfg": 1,
       "model": [
@@ -148,26 +148,26 @@
       "title": "CFGGuider"
     }
   },
-  "8:20": {
+  "8_20": {
     "inputs": {
       "noise": [
         "7",
         0
       ],
       "guider": [
-        "8:15",
+        "8_15",
         0
       ],
       "sampler": [
-        "8:16",
+        "8_16",
         0
       ],
       "sigmas": [
-        "8:17",
+        "8_17",
         0
       ],
       "latent_image": [
-        "8:18",
+        "8_18",
         0
       ]
     },
@@ -176,10 +176,10 @@
       "title": "SamplerCustomAdvanced"
     }
   },
-  "8:19": {
+  "8_19": {
     "inputs": {
       "samples": [
-        "8:20",
+        "8_20",
         0
       ],
       "vae": [
