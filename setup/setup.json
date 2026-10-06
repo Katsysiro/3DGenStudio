@@ -840,7 +840,88 @@
 					]
 				}
 			]
-		}		
+		},
+		{
+			"Name": "UltraTex",
+			"DiffusionModels": {
+				"FP8":   { "FileName": "flux-2-klein-base-9b-fp8.safetensors",   "Url": "https://huggingface.co/visualbruno/FLUX.2-klein-base-9b-fp8/resolve/main/flux-2-klein-base-9b-fp8.safetensors?download=true",   "Size": 9.57 }
+			},
+			"VAE":         [
+				{ "FileName": "flux2-vae.safetensors",                        "Url": "https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/vae/flux2-vae.safetensors?download=true",                                     "Size": 0.3  },
+				{ "FileName": "ultratex_flux2_decoder.pt",                        "Url": "https://www.modelscope.ai/models/Yibo-Zhang/UltraTex/resolve/master/flux2/decoder.pt?view=false",                                     "Size": 0.1  }
+			],
+			"TextEncoder": { "FileName": "qwen_3_8b_fp8mixed.safetensors", "Url": "https://huggingface.co/Comfy-Org/vae-text-encorder-for-flux-klein-9b/resolve/main/split_files/text_encoders/qwen_3_8b_fp8mixed.safetensors?download=true",          "Size": 5.6 }
+			,
+			"LoRA":[        				
+				{ "FileName": "ultratex_flux2.safetensors", "Url": "https://www.modelscope.ai/models/Yibo-Zhang/UltraTex/resolve/master/flux2/lora/dit_lora.safetensors?view=false", "Size": 0.47 }
+			],
+			"Workflows": [
+				{
+					"Name": "Texture Mesh with UltraTex - 6 Views",
+					"File": "setup/Texture Mesh with UltraTex - 6 Views.json",
+					"Inputs": [
+						{ "Node": "19", "Input": "image",  "Name": "Source Image", "Type": "Image" },
+						{ "Node": "22",  "Input": "glb_path",  "Name": "Source Mesh",   "Type": "Mesh" },
+						{ "Node": "38",  "Input": "value", "Name": "Resolution",  "Type": "Number", "Enums":[512,1024,1536,2048] },
+						{ "Node": "39",  "Input": "value", "Name": "Texture Size",  "Type": "Number", "Enums":[512,1024,2048,4096,8192] },
+						{ "Node": "40",  "Input": "value", "Name": "Seed",  "Type": "Number" },
+						{ "Node": "41",  "Input": "value", "Name": "Steps",  "Type": "Number" },
+						{ "Node": "25",  "Input": "guidance", "Name": "Guidance",  "Type": "Number" }
+					],
+					"Outputs": [
+						{ "Node": "32", "Name": "Save Mesh", "Type": "Mesh" }
+					]
+				},
+				{
+					"Name": "Texture Mesh with UltraTex - 10 Views",
+					"File": "setup/Texture Mesh with UltraTex - 10 Views.json",
+					"Inputs": [
+						{ "Node": "19", "Input": "image",  "Name": "Source Image", "Type": "Image" },
+						{ "Node": "22",  "Input": "glb_path",  "Name": "Source Mesh",   "Type": "Mesh" },
+						{ "Node": "38",  "Input": "value", "Name": "Resolution",  "Type": "Number", "Enums":[512,1024,1536,2048] },
+						{ "Node": "39",  "Input": "value", "Name": "Texture Size",  "Type": "Number", "Enums":[512,1024,2048,4096,8192] },
+						{ "Node": "40",  "Input": "value", "Name": "Seed",  "Type": "Number" },
+						{ "Node": "41",  "Input": "value", "Name": "Steps",  "Type": "Number" },
+						{ "Node": "25",  "Input": "guidance", "Name": "Guidance",  "Type": "Number" },
+						{ "Node": "26",  "Input": "elevation", "Name": "Elevation",  "Type": "Number" }
+					],
+					"Outputs": [
+						{ "Node": "32", "Name": "Save Mesh", "Type": "Mesh" }
+					]
+				},
+				{
+					"Name": "Gen Images with UltraTex - 6 Views",
+					"File": "setup/Gen Images with UltraTex - 6 Views.json",
+					"Inputs": [
+						{ "Node": "19", "Input": "image",  "Name": "Source Image", "Type": "Image" },
+						{ "Node": "22",  "Input": "glb_path",  "Name": "Source Mesh",   "Type": "Mesh" },
+						{ "Node": "38",  "Input": "value", "Name": "Resolution",  "Type": "Number", "Enums":[512,1024,1536,2048] },
+						{ "Node": "40",  "Input": "value", "Name": "Seed",  "Type": "Number" },
+						{ "Node": "41",  "Input": "value", "Name": "Steps",  "Type": "Number" },
+						{ "Node": "25",  "Input": "guidance", "Name": "Guidance",  "Type": "Number" }
+					],
+					"Outputs": [
+						{ "Node": "43", "Name": "Save Images", "Type": "Image" }
+					]
+				},
+				{
+					"Name": "Gen Images with UltraTex - 10 Views",
+					"File": "setup/Gen Images with UltraTex - 10 Views.json",
+					"Inputs": [
+						{ "Node": "19", "Input": "image",  "Name": "Source Image", "Type": "Image" },
+						{ "Node": "22",  "Input": "glb_path",  "Name": "Source Mesh",   "Type": "Mesh" },
+						{ "Node": "38",  "Input": "value", "Name": "Resolution",  "Type": "Number", "Enums":[512,1024,1536,2048] },
+						{ "Node": "40",  "Input": "value", "Name": "Seed",  "Type": "Number" },
+						{ "Node": "41",  "Input": "value", "Name": "Steps",  "Type": "Number" },
+						{ "Node": "25",  "Input": "guidance", "Name": "Guidance",  "Type": "Number" },
+						{ "Node": "26",  "Input": "elevation", "Name": "Elevation",  "Type": "Number" }
+					],
+					"Outputs": [
+						{ "Node": "56", "Name": "Save Images", "Type": "Image" }
+					]
+				}				
+			]
+		}			
 	],
 	"OtherWorkflows":[
 		{

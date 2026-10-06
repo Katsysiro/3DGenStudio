@@ -2117,9 +2117,18 @@ async function getNodeTypeById(nodeTypeId) {
   return await get(db, 'SELECT id, name FROM NodeTypes WHERE id = ?', [Number(nodeTypeId)]);
 }
 
+// Names migrateGraphNodeTypes retired. Callers (GraphPage's extra-result
+// spawner, getNodeKind) still use them, so resolve them instead of throwing.
+const LEGACY_NODE_TYPE_NAMES = {
+  'mesh gen': 'Mesh',
+  'image edit': 'Image'
+};
+
 async function getNodeTypeIdByName(name) {
   const db = await getDb();
-  const row = await get(db, 'SELECT id FROM NodeTypes WHERE lower(name) = lower(?)', [String(name || '').trim()]);
+  const trimmedName = String(name || '').trim();
+  const resolvedName = LEGACY_NODE_TYPE_NAMES[trimmedName.toLowerCase()] || trimmedName;
+  const row = await get(db, 'SELECT id FROM NodeTypes WHERE lower(name) = lower(?)', [resolvedName]);
   if (!row) {
     throw new Error(`Unknown node type: ${name}`);
   }

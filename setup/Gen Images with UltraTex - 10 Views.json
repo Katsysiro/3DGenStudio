@@ -1,0 +1,488 @@
+{
+  "2": {
+    "inputs": {
+      "mesh_path": "",
+      "render_size": 4096,
+      "atlas_size": 4096,
+      "uv_mode": "comfy_gpu",
+      "reference_alignment": "fit_front_silhouette",
+      "mask_meaning": "background (LoadImage)",
+      "reference_image": [
+        "19",
+        0
+      ],
+      "reference_mask": [
+        "19",
+        1
+      ],
+      "trimesh": [
+        "22",
+        0
+      ]
+    },
+    "class_type": "UltraTexPrep",
+    "_meta": {
+      "title": "UltraTex Prep (mesh + reference)"
+    }
+  },
+  "5": {
+    "inputs": {
+      "unet_name": "flux-2-klein-base-9b-fp8.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "Load Diffusion Model"
+    }
+  },
+  "6": {
+    "inputs": {
+      "vae_name": "flux2-vae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Load VAE"
+    }
+  },
+  "7": {
+    "inputs": {
+      "lora_name": "ultratex_flux2.safetensors",
+      "strength": 1,
+      "model": [
+        "5",
+        0
+      ]
+    },
+    "class_type": "UltraTexLoraLoader",
+    "_meta": {
+      "title": "UltraTex Load LoRA"
+    }
+  },
+  "8": {
+    "inputs": {
+      "decoder_name": "ultratex_flux2_decoder.pt",
+      "vae": [
+        "6",
+        0
+      ]
+    },
+    "class_type": "UltraTexForegroundDecoder",
+    "_meta": {
+      "title": "UltraTex Foreground VAE Decoder"
+    }
+  },
+  "19": {
+    "inputs": {
+      "image": ""
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "22": {
+    "inputs": {
+      "glb_path": "",
+      "only_vertices_and_faces": true
+    },
+    "class_type": "UltraTexLoadMesh",
+    "_meta": {
+      "title": "UltraText Load Mesh"
+    }
+  },
+  "25": {
+    "inputs": {
+      "resolution": [
+        "38",
+        0
+      ],
+      "steps": [
+        "41",
+        0
+      ],
+      "seed": [
+        "40",
+        0
+      ],
+      "guidance": 4,
+      "drop_background_tokens": true,
+      "memory_factor": 0,
+      "attention": "ultratex_sparse",
+      "sparse_topk": 0.2,
+      "token_chunk": 8192,
+      "denoise": 1,
+      "model": [
+        "7",
+        0
+      ],
+      "vae": [
+        "8",
+        0
+      ],
+      "positive": [
+        "36",
+        0
+      ],
+      "prep": [
+        "2",
+        0
+      ],
+      "negative": [
+        "36",
+        0
+      ]
+    },
+    "class_type": "UltraTexSampler",
+    "_meta": {
+      "title": "UltraTex Sampler"
+    }
+  },
+  "26": {
+    "inputs": {
+      "azimuth": 45,
+      "elevation": 0,
+      "elevation_mode": "per view",
+      "prep": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "UltraTexRotateRig",
+    "_meta": {
+      "title": "UltraTex Rotate Rig (second pass)"
+    }
+  },
+  "27": {
+    "inputs": {
+      "resolution": [
+        "38",
+        0
+      ],
+      "steps": [
+        "41",
+        0
+      ],
+      "seed": [
+        "40",
+        0
+      ],
+      "guidance": 4,
+      "drop_background_tokens": true,
+      "memory_factor": 0,
+      "attention": "ultratex_sparse",
+      "sparse_topk": 0.2,
+      "token_chunk": 8192,
+      "denoise": 0.6,
+      "model": [
+        "7",
+        0
+      ],
+      "vae": [
+        "8",
+        0
+      ],
+      "positive": [
+        "36",
+        0
+      ],
+      "prep": [
+        "26",
+        0
+      ],
+      "negative": [
+        "36",
+        0
+      ],
+      "init_views": [
+        "31",
+        0
+      ],
+      "keep_mask": [
+        "31",
+        1
+      ]
+    },
+    "class_type": "UltraTexSampler",
+    "_meta": {
+      "title": "UltraTex Sampler"
+    }
+  },
+  "31": {
+    "inputs": {
+      "resolution": [
+        "38",
+        0
+      ],
+      "keep_above": 0.75,
+      "keep_feather": 0.1,
+      "texture": "albedo",
+      "prep": [
+        "26",
+        0
+      ],
+      "source_prep": [
+        "2",
+        0
+      ],
+      "source_views": [
+        "25",
+        0
+      ]
+    },
+    "class_type": "UltraTexRenderViews",
+    "_meta": {
+      "title": "UltraTex Render Views (second pass)"
+    }
+  },
+  "36": {
+    "inputs": {
+      "text": "",
+      "clip": [
+        "42",
+        0
+      ]
+    },
+    "class_type": "UltraTexTextEncode",
+    "_meta": {
+      "title": "UltraTex Text Encode"
+    }
+  },
+  "38": {
+    "inputs": {
+      "value": 1024
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "Resolution"
+    }
+  },
+  "40": {
+    "inputs": {
+      "value": 12345
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "Seed"
+    }
+  },
+  "41": {
+    "inputs": {
+      "value": 25
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "Steps"
+    }
+  },
+  "42": {
+    "inputs": {
+      "clip_name": "qwen_3_8b_fp8mixed.safetensors",
+      "type": "flux2",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "Load CLIP"
+    }
+  },
+  "45": {
+    "inputs": {
+      "images.image0": [
+        "46",
+        0
+      ],
+      "images.image1": [
+        "47",
+        0
+      ],
+      "images.image2": [
+        "48",
+        0
+      ],
+      "images.image3": [
+        "49",
+        0
+      ],
+      "images.image4": [
+        "50",
+        0
+      ],
+      "images.image5": [
+        "51",
+        0
+      ],
+      "images.image6": [
+        "52",
+        0
+      ],
+      "images.image7": [
+        "53",
+        0
+      ],
+      "images.image8": [
+        "54",
+        0
+      ],
+      "images.image9": [
+        "55",
+        0
+      ]
+    },
+    "class_type": "BatchImagesNode",
+    "_meta": {
+      "title": "Batch Images"
+    }
+  },
+  "46": {
+    "inputs": {
+      "batch_index": 0,
+      "length": 1,
+      "image": [
+        "25",
+        0
+      ]
+    },
+    "class_type": "ImageFromBatch",
+    "_meta": {
+      "title": "Get Image from Batch"
+    }
+  },
+  "47": {
+    "inputs": {
+      "batch_index": 1,
+      "length": 1,
+      "image": [
+        "25",
+        0
+      ]
+    },
+    "class_type": "ImageFromBatch",
+    "_meta": {
+      "title": "Get Image from Batch"
+    }
+  },
+  "48": {
+    "inputs": {
+      "batch_index": 2,
+      "length": 1,
+      "image": [
+        "25",
+        0
+      ]
+    },
+    "class_type": "ImageFromBatch",
+    "_meta": {
+      "title": "Get Image from Batch"
+    }
+  },
+  "49": {
+    "inputs": {
+      "batch_index": 3,
+      "length": 1,
+      "image": [
+        "25",
+        0
+      ]
+    },
+    "class_type": "ImageFromBatch",
+    "_meta": {
+      "title": "Get Image from Batch"
+    }
+  },
+  "50": {
+    "inputs": {
+      "batch_index": 4,
+      "length": 1,
+      "image": [
+        "25",
+        0
+      ]
+    },
+    "class_type": "ImageFromBatch",
+    "_meta": {
+      "title": "Get Image from Batch"
+    }
+  },
+  "51": {
+    "inputs": {
+      "batch_index": 5,
+      "length": 1,
+      "image": [
+        "25",
+        0
+      ]
+    },
+    "class_type": "ImageFromBatch",
+    "_meta": {
+      "title": "Get Image from Batch"
+    }
+  },
+  "52": {
+    "inputs": {
+      "batch_index": 0,
+      "length": 1,
+      "image": [
+        "27",
+        0
+      ]
+    },
+    "class_type": "ImageFromBatch",
+    "_meta": {
+      "title": "Get Image from Batch"
+    }
+  },
+  "53": {
+    "inputs": {
+      "batch_index": 1,
+      "length": 1,
+      "image": [
+        "27",
+        0
+      ]
+    },
+    "class_type": "ImageFromBatch",
+    "_meta": {
+      "title": "Get Image from Batch"
+    }
+  },
+  "54": {
+    "inputs": {
+      "batch_index": 2,
+      "length": 1,
+      "image": [
+        "27",
+        0
+      ]
+    },
+    "class_type": "ImageFromBatch",
+    "_meta": {
+      "title": "Get Image from Batch"
+    }
+  },
+  "55": {
+    "inputs": {
+      "batch_index": 3,
+      "length": 1,
+      "image": [
+        "27",
+        0
+      ]
+    },
+    "class_type": "ImageFromBatch",
+    "_meta": {
+      "title": "Get Image from Batch"
+    }
+  },
+  "56": {
+    "inputs": {
+      "images": [
+        "45",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image"
+    }
+  }
+}

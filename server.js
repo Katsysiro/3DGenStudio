@@ -10791,7 +10791,10 @@ app.post('/api/image-edits/comfy', async (req, res) => {
       const valueType = normalizeComfyValueType(parameter.valueType, getDefaultComfyValueType(parameter));
       const providedValue = rawInputValues?.[parameter.id];
 
-      if (valueType === 'image') {
+      // A mesh input (e.g. a multi-view render of a mesh guided by an image) is
+      // uploaded the same way as an image. Without this branch it fell through to
+      // the string case and reached ComfyUI as "[object Object]".
+      if (valueType === 'image' || valueType === 'mesh') {
         // "None": upload nothing and reference no asset, so the input keeps the
         // value baked into the saved workflow JSON.
         if (isComfyNoneInput(providedValue)) {
@@ -10803,21 +10806,24 @@ app.post('/api/image-edits/comfy', async (req, res) => {
           : providedValue;
 
         if (!sourceReference) {
-          return res.status(400).json({ error: `An image asset is required for ${parameter.name}` });
+          return res.status(400).json({ error: `An ${valueType} asset is required for ${parameter.name}` });
         }
 
-        const resolvedImageSource = await resolveProjectSource(Number(projectId), 'image', sourceReference);
-        if (!resolvedImageSource?.asset || resolvedImageSource.asset.type !== 'image') {
-          return res.status(404).json({ error: `Image source not found for ${parameter.name}` });
+        const resolvedSource = await resolveProjectSource(Number(projectId), valueType, sourceReference);
+        if (!resolvedSource?.asset || resolvedSource.asset.type !== valueType) {
+          return res.status(404).json({ error: `${valueType === 'mesh' ? 'Mesh' : 'Image'} source not found for ${parameter.name}` });
         }
 
-        const inputBuffer = await readAssetBytes(resolvedImageSource.inputFilePath);
+        const inputBuffer = await readAssetBytes(resolvedSource.inputFilePath);
         resolvedInputs[parameter.id] = await uploadComfyInputFile(baseUrl, {
           buffer: inputBuffer,
-          mimetype: getMimeTypeFromFilename(resolvedImageSource.inputFilePath || resolvedImageSource.inputFilename || resolvedImageSource.inputName),
-          originalname: path.basename(resolvedImageSource.inputFilePath || resolvedImageSource.inputFilename || resolvedImageSource.inputName)
+          mimetype: getMimeTypeFromFilename(resolvedSource.inputFilePath || resolvedSource.inputFilename || resolvedSource.inputName),
+          originalname: path.basename(resolvedSource.inputFilePath || resolvedSource.inputFilename || resolvedSource.inputName)
         });
-        referencedImageAssets.push(resolvedImageSource.asset);
+        // Only an image can be the asset the edit is saved under.
+        if (valueType === 'image') {
+          referencedImageAssets.push(resolvedSource.asset);
+        }
         continue;
       }
 

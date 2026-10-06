@@ -1,0 +1,330 @@
+{
+  "2": {
+    "inputs": {
+      "mesh_path": "",
+      "render_size": 4096,
+      "atlas_size": 4096,
+      "uv_mode": "comfy_gpu",
+      "reference_alignment": "fit_front_silhouette",
+      "mask_meaning": "background (LoadImage)",
+      "reference_image": [
+        "19",
+        0
+      ],
+      "reference_mask": [
+        "19",
+        1
+      ],
+      "trimesh": [
+        "22",
+        0
+      ]
+    },
+    "class_type": "UltraTexPrep",
+    "_meta": {
+      "title": "UltraTex Prep (mesh + reference)"
+    }
+  },
+  "5": {
+    "inputs": {
+      "unet_name": "flux-2-klein-base-9b-fp8.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "Load Diffusion Model"
+    }
+  },
+  "6": {
+    "inputs": {
+      "vae_name": "flux2-vae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Load VAE"
+    }
+  },
+  "7": {
+    "inputs": {
+      "lora_name": "ultratex_flux2.safetensors",
+      "strength": 1,
+      "model": [
+        "5",
+        0
+      ]
+    },
+    "class_type": "UltraTexLoraLoader",
+    "_meta": {
+      "title": "UltraTex Load LoRA"
+    }
+  },
+  "8": {
+    "inputs": {
+      "decoder_name": "ultratex_flux2_decoder.pt",
+      "vae": [
+        "6",
+        0
+      ]
+    },
+    "class_type": "UltraTexForegroundDecoder",
+    "_meta": {
+      "title": "UltraTex Foreground VAE Decoder"
+    }
+  },
+  "19": {
+    "inputs": {
+      "image": "Image_4096_00023_.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "22": {
+    "inputs": {
+      "glb_path": "C:\\Git\\ComfyUI\\output\\3D\\DwarfSorcerer_MV\\DwarfSorcerer_MV_00001_.glb",
+      "only_vertices_and_faces": true
+    },
+    "class_type": "UltraTexLoadMesh",
+    "_meta": {
+      "title": "UltraText Load Mesh"
+    }
+  },
+  "25": {
+    "inputs": {
+      "resolution": [
+        "38",
+        0
+      ],
+      "steps": [
+        "41",
+        0
+      ],
+      "seed": [
+        "40",
+        0
+      ],
+      "guidance": 4,
+      "drop_background_tokens": true,
+      "memory_factor": 0,
+      "attention": "ultratex_sparse",
+      "sparse_topk": 0.2,
+      "token_chunk": 8192,
+      "denoise": 1,
+      "model": [
+        "7",
+        0
+      ],
+      "vae": [
+        "8",
+        0
+      ],
+      "positive": [
+        "36",
+        0
+      ],
+      "prep": [
+        "2",
+        0
+      ],
+      "negative": [
+        "36",
+        0
+      ]
+    },
+    "class_type": "UltraTexSampler",
+    "_meta": {
+      "title": "UltraTex Sampler"
+    }
+  },
+  "26": {
+    "inputs": {
+      "azimuth": 45,
+      "elevation": 0,
+      "elevation_mode": "per view",
+      "prep": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "UltraTexRotateRig",
+    "_meta": {
+      "title": "UltraTex Rotate Rig (second pass)"
+    }
+  },
+  "27": {
+    "inputs": {
+      "resolution": [
+        "38",
+        0
+      ],
+      "steps": [
+        "41",
+        0
+      ],
+      "seed": [
+        "40",
+        0
+      ],
+      "guidance": 4,
+      "drop_background_tokens": true,
+      "memory_factor": 0,
+      "attention": "ultratex_sparse",
+      "sparse_topk": 0.2,
+      "token_chunk": 8192,
+      "denoise": 0.6,
+      "model": [
+        "7",
+        0
+      ],
+      "vae": [
+        "8",
+        0
+      ],
+      "positive": [
+        "36",
+        0
+      ],
+      "prep": [
+        "26",
+        0
+      ],
+      "negative": [
+        "36",
+        0
+      ],
+      "init_views": [
+        "31",
+        0
+      ],
+      "keep_mask": [
+        "31",
+        1
+      ]
+    },
+    "class_type": "UltraTexSampler",
+    "_meta": {
+      "title": "UltraTex Sampler"
+    }
+  },
+  "31": {
+    "inputs": {
+      "resolution": [
+        "38",
+        0
+      ],
+      "keep_above": 0.75,
+      "keep_feather": 0.1,
+      "texture": "albedo",
+      "prep": [
+        "26",
+        0
+      ],
+      "source_prep": [
+        "2",
+        0
+      ],
+      "source_views": [
+        "25",
+        0
+      ]
+    },
+    "class_type": "UltraTexRenderViews",
+    "_meta": {
+      "title": "UltraTex Render Views (second pass)"
+    }
+  },
+  "32": {
+    "inputs": {
+      "texture_size": [
+        "39",
+        0
+      ],
+      "filename_prefix": "DwarfSorcerer_1024_Flux2",
+      "view_weight_power": 4,
+      "best_view_mix": 0.5,
+      "edge_feather_px": 6,
+      "views_2_use": "no top/bottom",
+      "prep": [
+        "2",
+        0
+      ],
+      "albedo_views": [
+        "25",
+        0
+      ],
+      "prep_2": [
+        "26",
+        0
+      ],
+      "albedo_views_2": [
+        "27",
+        0
+      ]
+    },
+    "class_type": "UltraTexBake",
+    "_meta": {
+      "title": "UltraTex Bake Texture"
+    }
+  },
+  "36": {
+    "inputs": {
+      "text": "",
+      "clip": [
+        "42",
+        0
+      ]
+    },
+    "class_type": "UltraTexTextEncode",
+    "_meta": {
+      "title": "UltraTex Text Encode"
+    }
+  },
+  "38": {
+    "inputs": {
+      "value": 1024
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "Resolution"
+    }
+  },
+  "39": {
+    "inputs": {
+      "value": 2048
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "Texture Size"
+    }
+  },
+  "40": {
+    "inputs": {
+      "value": 12345
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "Seed"
+    }
+  },
+  "41": {
+    "inputs": {
+      "value": 25
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "Steps"
+    }
+  },
+  "42": {
+    "inputs": {
+      "clip_name": "qwen_3_8b_fp8mixed.safetensors",
+      "type": "flux2",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "Load CLIP"
+    }
+  }
+}
