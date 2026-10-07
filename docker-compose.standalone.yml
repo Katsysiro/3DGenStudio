@@ -5,11 +5,19 @@
 # data server, which deliberately has no ComfyUI, no setup wizard and no
 # Settings (those routes answer 404 there, which is why the wizard cannot get
 # past its first step). This one runs the app in local mode -- everything a
-# desktop install does, except the Python sidecars (Auto UV/Retopo/Rig, mocap).
+# desktop install does -- plus its four Python services as sibling containers.
 #
 #   1. cp .env.standalone.example .env.standalone   (then edit it)
 #   2. docker compose -f docker-compose.standalone.yml --env-file .env.standalone up -d --build
 #   3. open http://<server>:3001
+#
+# That starts the app and the mesh-tools service (CPU). The three GPU services
+# are opt-in through profiles, one each or all together:
+#   ... --profile rig      Auto Rig (SkinTokens)
+#   ... --profile kimodo   text-to-motion (Kimodo)
+#   ... --profile mocap    video-to-motion (MoCapAnything)
+#   ... --profile gpu      all three
+# e.g. docker compose -f docker-compose.standalone.yml --env-file .env.standalone --profile rig up -d --build
 #
 # Full walkthrough: docs/DOCKER_STANDALONE.md
 services:
@@ -42,6 +50,17 @@ services:
       # Only if the models live outside <path>/models (mount them separately).
       GENSTUDIO_COMFYUI_MODELS_PATH: ${GENSTUDIO_COMFYUI_MODELS_PATH:-}
 
+      # The Python services below, by compose service name. A service whose
+      # profile is not started just reads as offline in the app.
+      GENSTUDIO_MESHTOOLS_URL: http://meshtools
+      GENSTUDIO_MESHTOOLS_PORT: "8200"
+      GENSTUDIO_RIGTOOLS_URL: http://rigtools
+      GENSTUDIO_RIGTOOLS_PORT: "8300"
+      GENSTUDIO_MOTIONTOOLS_URL: http://motiontools
+      GENSTUDIO_MOTIONTOOLS_PORT: "8400"
+      GENSTUDIO_MOCAPTOOLS_URL: http://mocaptools
+      GENSTUDIO_MOCAPTOOLS_PORT: "8401"
+
       # login:password. Strongly recommended if the port is reachable by anyone
       # but you: local mode has no user accounts and exposes Settings (API keys).
       GENSTUDIO_BASIC_AUTH: ${GENSTUDIO_BASIC_AUTH:-}
@@ -61,11 +80,82 @@ services:
     # To reach ComfyUI by its container name instead of through the host, put
     # both on the same network: uncomment this and the `networks:` block at the
     # bottom, and set GENSTUDIO_COMFYUI_URL=http://<comfyui container name>.
+    # Keep `default` in the list -- it is how the app reaches the Python services.
     # networks:
+    #   - default
     #   - comfy
+
+  # --- Python services -------------------------------------------------------
+  # Reached only by the app over the compose network, so no ports are published.
+  # Weights download into each service's /data volume on first start (watch
+  # `docker compose ... logs -f <service>`), never into the image.
+
+  # Auto UV / Retopo, bake, LODs, collisions, segmentation, tree generator, FBX
+  # export, mesh thumbnails. CPU only -- no GPU needed.
+  meshtools:
+    build:
+      context: ./python-server
+      args:
+        MESHTOOLS_GPU: ${MESHTOOLS_GPU:-0}
+    image: 3dgenstudio-meshtools:latest
+    restart: unless-stopped
+
+  # Auto Rig. GPU; ~14 GB of VRAM at peak upstream.
+  rigtools:
+    profiles: ["rig", "gpu"]
+    build:
+      context: ./thirdparty/skintokens
+      args:
+        TORCH_CUDA: ${TORCH_CUDA:-cu126}
+    image: 3dgenstudio-rigtools:latest
+    restart: unless-stopped
+    volumes:
+      - genstudio-rigtools-data:/data
+    deploy: &gpu
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # Text to motion. GPU for the motion model; the ~16 GB text encoder runs on
+  # the CPU (TEXT_ENCODER_DEVICE) and needs about that much free RAM.
+  motiontools:
+    profiles: ["kimodo", "gpu"]
+    build:
+      context: ./thirdparty/kimodo
+      additional_contexts:
+        wheels: ./resources/wheels/motion_correction
+      args:
+        TORCH_CUDA: ${TORCH_CUDA:-cu126}
+    image: 3dgenstudio-motiontools:latest
+    restart: unless-stopped
+    environment:
+      TEXT_ENCODER_DEVICE: ${KIMODO_TEXT_ENCODER_DEVICE:-cpu}
+      KIMODO_SKIP_ENCODER: ${KIMODO_SKIP_ENCODER:-}
+    volumes:
+      - genstudio-motiontools-data:/data
+    deploy: *gpu
+
+  # Video to motion. GPU; up to ~10 GB of VRAM during a capture.
+  mocaptools:
+    profiles: ["mocap", "gpu"]
+    build:
+      context: ./thirdparty/mocapanything
+      args:
+        TORCH_CUDA: ${TORCH_CUDA:-cu126}
+    image: 3dgenstudio-mocaptools:latest
+    restart: unless-stopped
+    volumes:
+      - genstudio-mocaptools-data:/data
+    deploy: *gpu
 
 volumes:
   genstudio-standalone-data:
+  genstudio-rigtools-data:
+  genstudio-motiontools-data:
+  genstudio-mocaptools-data:
 
 # networks:
 #   comfy:

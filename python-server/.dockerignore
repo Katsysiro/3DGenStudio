@@ -1,0 +1,9 @@
+.venv/
+**/__pycache__/
+*.log
+checkpoints/
+models/
+experiments/
+cache/
+Dockerfile
+.dockerignore

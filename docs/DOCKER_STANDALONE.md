@@ -19,7 +19,8 @@
 | `Dockerfile`, стадия `standalone` | Образ со всем приложением в локальном режиме (как десктоп, но без Electron) |
 | `docker-compose.standalone.yml` | Запуск этого образа рядом с вашим ComfyUI |
 | `.env.standalone.example` | Шаблон настроек |
-| `server.js` | Переменные `GENSTUDIO_COMFYUI_*` (адрес и папка ComfyUI) и `GENSTUDIO_BASIC_AUTH` (пароль на вход) |
+| `server.js` | Переменные `GENSTUDIO_COMFYUI_*`, `GENSTUDIO_MESHTOOLS_*` и др. (адреса сервисов) и `GENSTUDIO_BASIC_AUTH` (пароль на вход) |
+| `python-server/Dockerfile`, `thirdparty/*/Dockerfile` | Образы четырёх Python-сервисов |
 
 Штатный `docker-compose.yml` не изменился и работает как раньше.
 
@@ -89,7 +90,7 @@ docker compose -f docker-compose.standalone.yml --env-file .env.standalone logs 
 В логе должно быть:
 
 ```
-🔧 ComfyUI settings from environment: {"url":"http://host.docker.internal","port":"8188","path":"/comfyui"}
+🔧 Service settings from environment: {"comfyui":{"url":"http://host.docker.internal","port":"8188","path":"/comfyui"},"meshtools":{...},...}
 🚀 3D Gen Studio Backend running at http://localhost:3001
 ```
 
@@ -149,14 +150,48 @@ GENSTUDIO_COMFYUI_MODELS_PATH=/comfyui-models
 ComfyUI. Если ComfyUI работает от другого пользователя и вы не хотите файлы с
 владельцем root, задайте `GENSTUDIO_UID=1000:1000` (uid:gid владельца папки).
 
-## Что не работает в Docker-режиме
+## Python-сервисы
 
-Python-сервисы (mesh-tools :8200, SkinTokens :8300, Kimodo :8400,
-MoCapAnything :8401) в образ не входят: это функции Auto UV, Auto Retopo,
-Auto Rig, генерация анимации и превью-миниатюры мешей. Всё, что идёт через
-ComfyUI и внешние API (Tripo, Hitem3D, Tencent и т.д.), работает. При желании
-эти сервисы можно запустить отдельно (на машине с GPU, `python-server/run.sh`
-и т.п.) и указать их адреса в Settings.
+У приложения четыре Python-сервиса. Каждый в своём контейнере, все в том же
+`docker-compose.standalone.yml`. Наружу порты не публикуются: с ними говорит
+только контейнер приложения, адреса прописываются в Settings автоматически.
+
+| Сервис compose | Что даёт | GPU | Как включить |
+| --- | --- | --- | --- |
+| `meshtools` | Auto UV, Auto Retopo, Bake, LOD, коллизии, сегментация, Tree Generator, экспорт FBX, миниатюры мешей | нет | всегда запускается |
+| `rigtools` | Auto Rig (SkinTokens) | да | `--profile rig` |
+| `motiontools` | анимация по тексту (Kimodo) | да + ~16 ГБ RAM | `--profile kimodo` |
+| `mocaptools` | анимация из видео (MoCapAnything) | да | `--profile mocap` |
+
+`--profile gpu` включает все три GPU-сервиса:
+
+```bash
+docker compose -f docker-compose.standalone.yml --env-file .env.standalone --profile gpu up -d --build
+```
+
+Веса моделей не входят в образы: каждый сервис скачивает их при первом старте
+в свой том (`genstudio-rigtools-data` и т. д.). Первый старт долгий, особенно
+у Kimodo (~17 ГБ). Смотрите прогресс так:
+
+```bash
+docker compose -f docker-compose.standalone.yml --env-file .env.standalone logs -f motiontools
+```
+
+Для GPU-сервисов нужен `nvidia-container-toolkit` (тот же, что уже работает у
+ComfyUI). `TORCH_CUDA` в `.env.standalone` должен быть не новее версии CUDA,
+которую показывает `nvidia-smi` на хосте: `cu126` нужен драйвер 560+, `cu128` 570+.
+
+### Видеопамять: одна карта на всех
+
+ComfyUI и три GPU-сервиса делят одну видеокарту. Пиковое потребление по
+данным автора: Auto Rig до ~14 ГБ, видео-в-анимацию до ~10 ГБ. На карте с
+10 ГБ (CMP 90HX) запускайте тяжёлое по очереди и держите GPU-сервисы
+выключенными, когда они не нужны:
+
+```bash
+docker compose -f docker-compose.standalone.yml --env-file .env.standalone stop rigtools
+docker compose -f docker-compose.standalone.yml --env-file .env.standalone --profile rig start rigtools
+```
 
 ## Безопасность
 

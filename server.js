@@ -12127,22 +12127,32 @@ bootstrapDatabase().then(() => initializeStorage()).then(async () => {
   // mount point of its folder are deployment facts. Each variable that is set
   // overwrites the stored value on every start; unset ones leave Settings
   // alone, so the UI still owns anything the deployment does not pin.
+  // The Python sidecars work the same way (GENSTUDIO_MESHTOOLS_URL, ..._PORT).
   if (SERVER_MODE !== 'server') {
-    const comfyFromEnv = Object.fromEntries(Object.entries({
-      url: process.env.GENSTUDIO_COMFYUI_URL,
-      port: process.env.GENSTUDIO_COMFYUI_PORT,
-      path: process.env.GENSTUDIO_COMFYUI_PATH,
-      modelsPath: process.env.GENSTUDIO_COMFYUI_MODELS_PATH
-    }).filter(([, value]) => value !== undefined && String(value).trim() !== '')
+    const pickEnv = (fields) => Object.fromEntries(Object.entries(fields)
+      .filter(([, value]) => value !== undefined && String(value).trim() !== '')
       .map(([key, value]) => [key, String(value).trim()]));
+    const env = process.env;
+    const apisFromEnv = Object.fromEntries(Object.entries({
+      comfyui: pickEnv({
+        url: env.GENSTUDIO_COMFYUI_URL,
+        port: env.GENSTUDIO_COMFYUI_PORT,
+        path: env.GENSTUDIO_COMFYUI_PATH,
+        modelsPath: env.GENSTUDIO_COMFYUI_MODELS_PATH
+      }),
+      meshtools: pickEnv({ url: env.GENSTUDIO_MESHTOOLS_URL, port: env.GENSTUDIO_MESHTOOLS_PORT }),
+      rigtools: pickEnv({ url: env.GENSTUDIO_RIGTOOLS_URL, port: env.GENSTUDIO_RIGTOOLS_PORT }),
+      motiontools: pickEnv({ url: env.GENSTUDIO_MOTIONTOOLS_URL, port: env.GENSTUDIO_MOTIONTOOLS_PORT }),
+      mocaptools: pickEnv({ url: env.GENSTUDIO_MOCAPTOOLS_URL, port: env.GENSTUDIO_MOCAPTOOLS_PORT })
+    }).filter(([, fields]) => Object.keys(fields).length > 0));
 
-    if (Object.keys(comfyFromEnv).length > 0) {
+    if (Object.keys(apisFromEnv).length > 0) {
       try {
         const current = await getSettings();
-        await saveSettings(mergeDeep(current || DEFAULT_SETTINGS, { apis: { comfyui: comfyFromEnv } }));
-        console.log(`🔧 ComfyUI settings from environment: ${JSON.stringify(comfyFromEnv)}`);
+        await saveSettings(mergeDeep(current || DEFAULT_SETTINGS, { apis: apisFromEnv }));
+        console.log(`🔧 Service settings from environment: ${JSON.stringify(apisFromEnv)}`);
       } catch (err) {
-        console.warn('Failed to apply ComfyUI settings from environment:', err.message);
+        console.warn('Failed to apply service settings from environment:', err.message);
       }
     }
   }
