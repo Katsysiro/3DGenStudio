@@ -109,3 +109,15 @@ dist/
 # one migration script, not the rest of tools/.
 !tools/migrate-sqlite-to-postgres.mjs
 
+
+# The standalone image (Dockerfile target `standalone`, docker-compose.standalone.yml)
+# runs the whole app in local mode, so it also needs the setup wizard's catalogue
+# and workflows, the example workflows, the animation/rig library the mesh
+# editor serves from /resources, and gltfpack for Optimize/LOD. The server-mode
+# image COPYs its files by name, so re-opening these does not change it.
+!setup/
+!comfyui_workflows/
+!resources/animations/
+!resources/animpreviews/
+!resources/rigs/
+!tools/meshoptimizer/linux/

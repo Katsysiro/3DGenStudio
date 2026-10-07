@@ -1,0 +1,73 @@
+# 3D Gen Studio as ONE self-contained web app, talking to a ComfyUI that runs in
+# another container (or anywhere reachable over HTTP).
+#
+# This is NOT the same as docker-compose.yml: that one is the shared multi-user
+# data server, which deliberately has no ComfyUI, no setup wizard and no
+# Settings (those routes answer 404 there, which is why the wizard cannot get
+# past its first step). This one runs the app in local mode -- everything a
+# desktop install does, except the Python sidecars (Auto UV/Retopo/Rig, mocap).
+#
+#   1. cp .env.standalone.example .env.standalone   (then edit it)
+#   2. docker compose -f docker-compose.standalone.yml --env-file .env.standalone up -d --build
+#   3. open http://<server>:3001
+#
+# Full walkthrough: docs/DOCKER_STANDALONE.md
+services:
+  genstudio:
+    build:
+      context: .
+      target: standalone
+    image: 3dgenstudio-standalone:latest
+    restart: unless-stopped
+    # root by default: the setup wizard writes model files into the ComfyUI
+    # folder mounted below, and that folder belongs to whatever user the ComfyUI
+    # container runs as. Set GENSTUDIO_UID=1000:1000 (etc.) to match it instead.
+    user: "${GENSTUDIO_UID:-0:0}"
+    ports:
+      - "${GENSTUDIO_PORT:-3001}:3001"
+    environment:
+      GENSTUDIO_MODE: local
+
+      # Where ComfyUI answers, as seen FROM THIS CONTAINER. Applied to Settings on
+      # every start (leave a variable empty to manage that field in the UI).
+      #   - ComfyUI publishes 8188 on the host        -> http://host.docker.internal
+      #   - both containers share a docker network    -> http://<comfyui service name>
+      GENSTUDIO_COMFYUI_URL: ${GENSTUDIO_COMFYUI_URL:-http://host.docker.internal}
+      GENSTUDIO_COMFYUI_PORT: ${GENSTUDIO_COMFYUI_PORT:-8188}
+
+      # Where the ComfyUI folder is mounted INSIDE this container (see volumes).
+      # The setup wizard is pre-filled with it and downloads models into
+      # <path>/models/..., which ComfyUI then sees in its own container.
+      GENSTUDIO_COMFYUI_PATH: ${GENSTUDIO_COMFYUI_PATH:-/comfyui}
+      # Only if the models live outside <path>/models (mount them separately).
+      GENSTUDIO_COMFYUI_MODELS_PATH: ${GENSTUDIO_COMFYUI_MODELS_PATH:-}
+
+      # login:password. Strongly recommended if the port is reachable by anyone
+      # but you: local mode has no user accounts and exposes Settings (API keys).
+      GENSTUDIO_BASIC_AUTH: ${GENSTUDIO_BASIC_AUTH:-}
+
+      # Behind a reverse proxy, the public address asset URLs should use.
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
+      TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-0}
+    extra_hosts:
+      # Makes host.docker.internal resolve on Linux too.
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # Projects, assets and the SQLite database. Must be /app/data.
+      - genstudio-standalone-data:/app/data
+      # The ComfyUI folder (the one that contains models/), shared with the
+      # ComfyUI container. A host path, e.g. /opt/comfyui.
+      - ${COMFYUI_DIR:?set COMFYUI_DIR in .env.standalone to the ComfyUI folder on the host}:/comfyui
+    # To reach ComfyUI by its container name instead of through the host, put
+    # both on the same network: uncomment this and the `networks:` block at the
+    # bottom, and set GENSTUDIO_COMFYUI_URL=http://<comfyui container name>.
+    # networks:
+    #   - comfy
+
+volumes:
+  genstudio-standalone-data:
+
+# networks:
+#   comfy:
+#     external: true
+#     name: ${COMFYUI_NETWORK:-comfyui_default}

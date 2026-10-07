@@ -94,3 +94,4 @@ thirdparty/mocapanything/outputs/
 /.env.*
 !/.env.docker.example
 !/.env.development
+!/.env.standalone.example

@@ -31,6 +31,43 @@ RUN npm run build
 RUN npm ci --omit=dev && npm cache clean --force
 
 # ---------------------------------------------------------------------------
+# Standalone: the WHOLE app in one container, in local mode -- the same thing a
+# desktop install runs, minus Electron and the Python sidecars. ComfyUI is
+# reached over HTTP (typically another container), and the setup wizard
+# downloads models into the ComfyUI folder mounted at GENSTUDIO_COMFYUI_PATH.
+# Build it with `--target standalone`; see docker-compose.standalone.yml and
+# docs/DOCKER_STANDALONE.md.
+#
+# Declared BEFORE `runtime` on purpose: a plain `docker build` builds the last
+# stage, and that must stay the shared-server image docker-compose.yml expects.
+# ---------------------------------------------------------------------------
+FROM node:24-bookworm-slim AS standalone
+WORKDIR /app
+
+ENV NODE_ENV=production \
+    GENSTUDIO_MODE=local \
+    PORT=3001
+
+# The builder's /app already holds the production node_modules, dist/ and every
+# source file .dockerignore lets through (setup/, resources/, gltfpack...), so
+# copying it whole is both simplest and complete for local mode.
+COPY --from=builder --chown=node:node /app ./
+RUN chmod +x tools/meshoptimizer/linux/gltfpack 2>/dev/null || true; \
+    mkdir -p /app/data && chown node:node /app /app/data
+
+# Runs as root by default in compose (see docker-compose.standalone.yml): the
+# wizard writes models into the ComfyUI folder, which belongs to whatever user
+# the ComfyUI container runs as. Switch with `user:` when the ownership allows.
+
+EXPOSE 3001
+VOLUME ["/app/data"]
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3001)+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
+CMD ["node", "server.js"]
+
+# ---------------------------------------------------------------------------
 # Runtime
 # ---------------------------------------------------------------------------
 FROM node:24-bookworm-slim AS runtime

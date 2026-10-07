@@ -3,7 +3,7 @@ import cors from 'cors';
 import multer from 'multer';
 import path from 'path';
 import { Buffer } from 'buffer';
-import { randomUUID } from 'crypto';
+import { randomUUID, timingSafeEqual } from 'crypto';
 import { createAssetEditRecord, createBrushChildRecord, resolveProjectImageSource, resolveProjectMeshSource } from './storage.js';
 import fs from 'fs/promises';
 import { createWriteStream, existsSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
@@ -421,6 +421,37 @@ const APP_DIR = path.dirname(fileURLToPath(import.meta.url));
 
 // Middleware
 app.use(cors());
+
+// Optional HTTP Basic auth for a local-mode install that is reachable over the
+// network -- the standalone Docker image (docker-compose.standalone.yml). Local
+// mode has no accounts of its own, and it exposes Settings, the filesystem
+// browser and every compute route, so a server on a LAN wants at least this.
+//
+// GENSTUDIO_BASIC_AUTH=login:password turns it on. Server mode has real
+// accounts (auth.js) and ignores it. Loopback callers are exempt because the
+// MCP endpoint and the batch runner call this process's own REST API on
+// 127.0.0.1; a client coming through Docker's port mapping arrives from the
+// bridge gateway, never from loopback. /api/health stays open for the
+// healthcheck. Browsers resend the credentials on <img>, GLTF and EventSource
+// requests to the same origin, so the UI needs no changes.
+const BASIC_AUTH = String(process.env.GENSTUDIO_BASIC_AUTH || '').trim();
+if (SERVER_MODE !== 'server' && BASIC_AUTH) {
+  if (!BASIC_AUTH.includes(':')) {
+    console.error('\n❌ GENSTUDIO_BASIC_AUTH must look like login:password\n');
+    process.exit(1);
+  }
+  const expected = Buffer.from(BASIC_AUTH);
+  const isLoopback = address => ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(String(address || ''));
+  app.use((req, res, next) => {
+    if (req.path === '/api/health' || isLoopback(req.socket?.remoteAddress)) return next();
+    const header = String(req.headers.authorization || '');
+    const supplied = header.startsWith('Basic ') ? Buffer.from(header.slice(6).trim(), 'base64') : Buffer.alloc(0);
+    if (supplied.length === expected.length && timingSafeEqual(supplied, expected)) return next();
+    res.setHeader('WWW-Authenticate', 'Basic realm="3D Gen Studio", charset="UTF-8"');
+    res.status(401).send('Authentication required');
+  });
+  console.log('🔒 HTTP Basic auth enabled (GENSTUDIO_BASIC_AUTH)');
+}
 
 // Hide the local-machine routes when this process is the shared server.
 // Mounted first, ahead of the body parsers and the auth gate, so a local-only
@@ -12088,6 +12119,31 @@ bootstrapDatabase().then(() => initializeStorage()).then(async () => {
       console.error('   The server has no usable account, so it is refusing to start.');
       console.error('   Fix GENSTUDIO_ADMIN_LOGIN / GENSTUDIO_ADMIN_PASSWORD in your .env and restart.\n');
       process.exit(1);
+    }
+  }
+
+  // Containers are configured from the environment, not by clicking through
+  // Settings: when ComfyUI runs in another container its address and the
+  // mount point of its folder are deployment facts. Each variable that is set
+  // overwrites the stored value on every start; unset ones leave Settings
+  // alone, so the UI still owns anything the deployment does not pin.
+  if (SERVER_MODE !== 'server') {
+    const comfyFromEnv = Object.fromEntries(Object.entries({
+      url: process.env.GENSTUDIO_COMFYUI_URL,
+      port: process.env.GENSTUDIO_COMFYUI_PORT,
+      path: process.env.GENSTUDIO_COMFYUI_PATH,
+      modelsPath: process.env.GENSTUDIO_COMFYUI_MODELS_PATH
+    }).filter(([, value]) => value !== undefined && String(value).trim() !== '')
+      .map(([key, value]) => [key, String(value).trim()]));
+
+    if (Object.keys(comfyFromEnv).length > 0) {
+      try {
+        const current = await getSettings();
+        await saveSettings(mergeDeep(current || DEFAULT_SETTINGS, { apis: { comfyui: comfyFromEnv } }));
+        console.log(`🔧 ComfyUI settings from environment: ${JSON.stringify(comfyFromEnv)}`);
+      } catch (err) {
+        console.warn('Failed to apply ComfyUI settings from environment:', err.message);
+      }
     }
   }
 
