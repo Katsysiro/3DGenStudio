@@ -1,0 +1,18 @@
+# Custom nodes the 3D Gen Studio setup workflows need, at the commits the
+# app is tested with (from setup/comfyui.json). Format: <folder> <github repo> <commit>
+comfyui_controlnet_aux Fannovel16/comfyui_controlnet_aux 59b1fc411ede8623b2997855b8018f0b3b6cf49f
+ComfyUI_essentials cubiq/ComfyUI_essentials 9d9f4bedfc9f0321c19faf71855e228c93bd0dc9
+comfyui-flux2fun-controlnet visualbruno/comfyui-flux2fun-controlnet aca3a74de5723f13d77d54734ffaba2321ec5fe8
+ComfyUI-GGUF city96/ComfyUI-GGUF 6ea2651e7df66d7585f6ffee804b20e92fb38b8a
+ComfyUI-GGUF-Qwen3VL-TE pottokao-dotcom/ComfyUI-GGUF-Qwen3VL-TE 81b1ceea2fc16e52faddfd5fd6a597e4356e2709
+ComfyUI-Hunyuan3d-2-1 visualbruno/ComfyUI-Hunyuan3d-2-1 a0b26fbb94c9a9d32720526c52e64f87e05d2b53
+ComfyUI-Hunyuan3DWrapper visualbruno/ComfyUI-Hunyuan3DWrapper 1cc6627e847e80a16140e75e421fed34ff9ea7b5
+ComfyUI-KJNodes kijai/ComfyUI-KJNodes d3cfe21625e5170126ce06fbfcfe1d88108688c3
+ComfyUI-LogicUtils aria1th/ComfyUI-LogicUtils f77c699543b8f9977b24581af66ad026d340b663
+ComfyUI-Marigold-v2 visualbruno/ComfyUI-Marigold-v2 2b56d96f3c56541aec9a9ec52fc9fe9f26a77ccc
+ComfyUI-QwenVL 1038lab/ComfyUI-QwenVL 1b67b443918801f571714bab636edc1845b7002a
+ComfyUI-RMBG 1038lab/ComfyUI-RMBG 229529e0ea63fb7085848225d74f91f6dc164956
+ComfyUI-Tools visualbruno/ComfyUI-Tools 21144f8ddcb1afab2c13aceaa6dd2b75846aa21e
+ComfyUI-Trellis2 visualbruno/ComfyUI-Trellis2 b0e84c0f29857a444e8bcb5b9be2ea218e96efd0
+ComfyUI-UltraTex visualbruno/ComfyUI-UltraTex d57e561d2911583d655b1b4091751a04647f2536
+rgthree-comfy rgthree/rgthree-comfy 55ee1c7b26a47ba3db58bf6c94f649c776c66d33
