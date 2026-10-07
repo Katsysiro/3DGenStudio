@@ -437,7 +437,15 @@ app.use(cors());
 const BASIC_AUTH = String(process.env.GENSTUDIO_BASIC_AUTH || '').trim();
 if (SERVER_MODE !== 'server' && BASIC_AUTH) {
   if (!BASIC_AUTH.includes(':')) {
-    console.error('\n❌ GENSTUDIO_BASIC_AUTH must look like login:password\n');
+    // Never echo the value -- it is a password. Its shape is enough to spot the
+    // usual mistakes: a ';' or full-width '：' typed on another keyboard layout,
+    // or only the login with the ':password' half missing.
+    const masked = BASIC_AUTH.replace(/[^;：=\s]/g, '*');
+    console.error(
+      '\n❌ GENSTUDIO_BASIC_AUTH must look like login:password (an ASCII colon between them).'
+      + `\n   Got ${BASIC_AUTH.length} characters, shaped like: ${masked}`
+      + '\n   Fix it in .env.standalone, or leave it empty to turn the password off.\n'
+    );
     process.exit(1);
   }
   const expected = Buffer.from(BASIC_AUTH);
