@@ -247,11 +247,14 @@ RUN for m in numpy torch flash_attn sageattention cumesh o_voxel flex_gemm nvdif
 # GGUF-энкодер/модель падает с "unexpected keyword argument 'input_act'".
 # Поэтому здесь закрепляется версия, с которой тестирует 3D Gen Studio.
 # Слой стоит в конце нарочно: смена версии пересобирает только его, а не
-# CUDA-расширения выше. PIP_CONSTRAINT удерживает torch/numpy/kornia.
+# CUDA-расширения выше. PIP_CONSTRAINT удерживает torch/numpy/kornia; строка
+# kornia>=0.7.1 из requirements ComfyUI пропускается — у вас намеренно стоит
+# 0.6.12 (фикс под AMD A10), с ней ComfyUI работал и раньше.
 ARG COMFYUI_VERSION=v0.38.0
 RUN git -C /workspace/comfyui fetch -q --tags origin || true; \
     git -C /workspace/comfyui checkout -q "$COMFYUI_VERSION" && \
-    pip3 install --no-cache-dir -r /workspace/comfyui/requirements.txt && \
+    grep -viE '^\s*kornia' /workspace/comfyui/requirements.txt > /tmp/comfy-req.txt && \
+    pip3 install --no-cache-dir -r /tmp/comfy-req.txt && \
     echo "ComfyUI: $(git -C /workspace/comfyui describe --tags --always)"
 
 COPY entrypoint.sh /entrypoint.sh
