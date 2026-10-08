@@ -75,3 +75,27 @@ docker compose logs -f comfyui
 собран под AVX2, которого нет у AMD A10.
 
 При старте в логе ComfyUI не должно быть `IMPORT FAILED` у паков из таблицы выше.
+
+## PixelArtistry: Watertight & Game-Ready
+
+Блок 5 Dockerfile — Linux-аналог `watertightMeshes_win_installer.bat`
+([PixelArtistry-Watertight-Meshes](https://github.com/pixelartistry/PixelArtistry-Watertight-Meshes)):
+
+| Что | Как в образе |
+| --- | --- |
+| 8 паков нод MostAadTech (Quad Reconstruct, CuMesh Decimate, Memory Cleaner, LODTailor, Bake Forger, Mesh Encoder, LODsmith, Fast Merge) | те же коммиты, что в .bat (`pixelartistry-nodes.txt`) |
+| Fast Merge, быстрый режим | C++-часть собирается под Linux (в репо только Windows-DLL) |
+| Blender (для LODTailor, Bake Forger, LODsmith) | официальная Linux-сборка 4.5 LTS в `/opt/blender`, доступна как `blender` |
+| 4 workflow | при старте кладутся в `user/default/workflows/PixelArtistry` |
+| Модели | `docker compose exec comfyui bash /opt/pixelartistry-models.sh` — докачивает только недостающие, уже имеющиеся (в т.ч. из мастера 3D Gen Studio) переиспользует жёсткими ссылками |
+| Trellis2 + CuMesh + O-Voxel (то, что требует TRELLIS.2 Installation Guide) | уже есть в блоке 4 |
+
+**WTiVo не работает на Linux.** У него в репозитории только Windows-бинарники
+(`.pyd`/`.dll` под CPython 3.12), исходников нативной части нет, а CMakeLists
+прямо запрещает сборку не под Windows. Поэтому:
+
+* **Workflow 03 (свой меш → game-ready)** WTiVo не использует — работает полностью.
+* **Workflow 01, 01b, 02** используют ноду `WTiVoNativeMeshToMesh`. Её нужно
+  отключить (выделить → Ctrl+B). Следом идёт LODTailor, который перестраивает
+  меш воксельным ремешем в Blender, — результат обычно получается замкнутым,
+  но без гарантий WTiVo: проверяйте в Blender (3D Print Toolbox → Check All).

@@ -1,0 +1,16 @@
+# PixelArtistry "Watertight & Game-Ready" node packs (by MostAadTech), at the
+# commits pinned by watertightMeshes_win_installer.bat (PIN_DATE 2026-09-26).
+# Format: <folder> <github repo> <commit>
+#
+# NOT listed: WTiVo-WatertightVoxel-ComfyuiNode. It ships only prebuilt
+# Windows binaries (.pyd/.dll, CPython 3.12) and its CMakeLists refuses any
+# non-Windows build; the native sources are not in the repository. It cannot
+# run in a Linux container. See README.md for the workaround.
+ComfyUI-Mesh-Quad-Reconstruct Mstafa-awad/ComfyUI-Mesh-Quad-Reconstruct 74048b3415537e26cc72b46b082a010cd0e357ce
+ComfyUI-CuMesh-Decimate Mstafa-awad/ComfyUI-CuMesh-Decimate c4edeb96bf637239cecb731d2869469a3025d742
+ComfyUI-Memory-Cleaner Mstafa-awad/ComfyUI-Memory-Cleaner 3357282290278c96ffa0da180d43bc5eac5f2286
+LODTailor-The-Mesh-Trimmer-ComfyuiNode Mstafa-awad/LODTailor-The-Mesh-Trimmer-ComfyuiNode 3d25b7d4aa382fa5dac210eb5d8d0eadc4a4f183
+LODTailor-Bake-Forger Mstafa-awad/LODTailor-Bake-Forger f13589c22558e3ca49dfa87dce709233eb3cc86b
+Trellis2-Mesh-Encoder Mstafa-awad/Trellis2-Mesh-Encoder 860313e67f0f69d402310dc325707bab8bec2fe9
+ComfyUI_LODsmith_Merge_Watertight Mstafa-awad/ComfyUI_LODsmith_Merge_Watertight 5da6dd69c02d0f3d4ae743d090cfac79aefe7f96
+WTiVo-FastMergeByDistance Mstafa-awad/WTiVo-FastMergeByDistance 5392949165ceed1e74448b1949d6e0dc9b34dd92

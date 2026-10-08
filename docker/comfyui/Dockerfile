@@ -241,6 +241,64 @@ RUN for m in numpy torch flash_attn sageattention cumesh o_voxel flex_gemm nvdif
     done | tee -a /opt/genstudio-install-report.txt; \
     echo; echo "===== 3D Gen Studio: итог установки ====="; cat /opt/genstudio-install-report.txt
 
+# ====================================================================
+# 🧱 5. PIXELARTISTRY: WATERTIGHT & GAME-READY (ноды MostAadTech)
+# ====================================================================
+#
+# Linux-аналог watertightMeshes_win_installer.bat: те же паки на тех же
+# коммитах, Blender, workflow. Отличие одно — WTiVo: у него есть только
+# Windows-бинарники, на Linux он не запускается (см. README.md).
+
+# Blender — его запускают LODTailor, Bake Forger и LODsmith (headless).
+# Официальная сборка для Linux; последний патч выбранной LTS-ветки берётся
+# со страницы релизов. Ссылка /usr/local/bin/blender нужна, потому что в
+# workflow путь к Blender по умолчанию — просто "blender".
+ARG BLENDER_SERIES=4.5
+RUN set -eux; apt-get update; apt-get install -y --no-install-recommends \
+      curl ca-certificates xz-utils libxi6 libxxf86vm1 libxfixes3 libxrender1 libxkbcommon0 libsm6 libice6 libx11-6; \
+    rm -rf /var/lib/apt/lists/*; \
+    base="https://download.blender.org/release/Blender${BLENDER_SERIES}"; \
+    file="$(curl -fsSL "$base/" | grep -oE "blender-${BLENDER_SERIES}\.[0-9]+-linux-x64\.tar\.xz" | sort -V | tail -1)"; \
+    [ -n "$file" ]; \
+    curl -fsSL "$base/$file" | tar -xJ -C /opt; \
+    mv /opt/blender-${BLENDER_SERIES}.*-linux-x64 /opt/blender; \
+    ln -sf /opt/blender/blender /usr/local/bin/blender; \
+    blender --background --factory-startup --python-expr "import bpy; print('Blender OK', bpy.app.version_string)" 2>&1 | grep "Blender OK"
+
+# Паки нод — туда же, откуда entrypoint докладывает их в том custom_nodes.
+COPY pixelartistry-nodes.txt /opt/pixelartistry-nodes.txt
+RUN set -eu; cd /opt/genstudio-nodes; \
+    grep -v '^#' /opt/pixelartistry-nodes.txt | while read -r name repo ref; do \
+      [ -n "$name" ] || continue; \
+      git init -q "$name"; \
+      git -C "$name" fetch -q --depth 1 "https://github.com/$repo" "$ref"; \
+      git -C "$name" checkout -q FETCH_HEAD; \
+      echo "✅ $name @ $ref"; \
+    done; \
+    pip3 install --no-cache-dir \
+      -r ComfyUI-Mesh-Quad-Reconstruct/requirements.txt \
+      -r Trellis2-Mesh-Encoder/requirements.txt \
+      -r WTiVo-FastMergeByDistance/requirements.txt
+
+# Fast Merge: быстрый нативный режим. В репозитории лежит только Windows-DLL;
+# собираем ту же C++-библиотеку под Linux и кладём под тем же именем —
+# ctypes грузит её по пути, расширение файла ему безразлично. Без неё нода
+# работает в медленном Python-режиме.
+RUN set -eux; d=/opt/genstudio-nodes/WTiVo-FastMergeByDistance; \
+    g++ -O3 -std=c++17 -shared -fPIC -fopenmp "$d/cpp/wtivo_fast_weld.cpp" -o "$d/native/wtivo_fast_weld_mt.dll"; \
+    python3 -c "import sys; sys.path.insert(0, '$d'); import native; assert native.native_available(); print('FastMerge native OK, threads:', native.native_thread_count())"
+
+# Workflow PixelArtistry. ./user у вас — том, поэтому их тоже раскладывает
+# entrypoint (в user/default/workflows/PixelArtistry, если папки ещё нет).
+ARG PIXELARTISTRY_REF=5b3a0e9d2c5783ed05ba45bbcc157b9509fb267b
+RUN set -eu; git init -q /tmp/pa; \
+    git -C /tmp/pa fetch -q --depth 1 https://github.com/pixelartistry/PixelArtistry-Watertight-Meshes "$PIXELARTISTRY_REF"; \
+    git -C /tmp/pa checkout -q FETCH_HEAD; \
+    mkdir -p /opt/pixelartistry-workflows; cp /tmp/pa/workflows/*.json /opt/pixelartistry-workflows/; \
+    rm -rf /tmp/pa; ls /opt/pixelartistry-workflows
+
+COPY pixelartistry-models.sh /opt/pixelartistry-models.sh
+
 # Версия ComfyUI. Клон выше берёт master, а master ломает ноды без
 # предупреждения: ComfyUI 0.39 (7 окт. 2026) стал передавать в слои
 # аргументы input_act/act_weight, которых не знает ComfyUI-GGUF, и любой

@@ -39,6 +39,14 @@ if [ -d /opt/genstudio-nodes ]; then
   done
 fi
 
+# 7б. Workflow PixelArtistry (./user — тоже том). Кладутся один раз: если
+#     папка уже есть, ваши правки в них не перезаписываются.
+WF_DIR=/workspace/comfyui/user/default/workflows/PixelArtistry
+if [ -d /opt/pixelartistry-workflows ] && [ ! -e "$WF_DIR" ]; then
+  echo "🧱 Добавляем workflow PixelArtistry"
+  mkdir -p "$WF_DIR" && cp /opt/pixelartistry-workflows/*.json "$WF_DIR/"
+fi
+
 # 8. Виртуальный дисплей для UltraTex: moderngl на Linux создаёт OpenGL-контекст
 #    только через X11. Xvfb даёт его без монитора.
 if command -v Xvfb >/dev/null 2>&1 && [ -z "${DISPLAY:-}" ]; then
