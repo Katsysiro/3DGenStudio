@@ -280,6 +280,28 @@ RUN set -eu; cd /opt/genstudio-nodes; \
       -r Trellis2-Mesh-Encoder/requirements.txt \
       -r WTiVo-FastMergeByDistance/requirements.txt
 
+# Зависимости паков из видео-workflow PixelArtistry (Trellis2-GGUF, Texture
+# Projection, SkinTokens). Их .bat ставят requirements с --no-deps, чтобы не
+# сдвинуть numpy; здесь то же самое держат ограничения PIP_CONSTRAINT.
+# Не ставятся намеренно: transformers==5.2.0 из Trellis2-GGUF (уже стоит
+# свой, нужный остальным нодам) и utils3d с git (стоит закреплённый выше).
+RUN pip3 install --no-cache-dir \
+      gguf rectpack sdnq plotly \
+      dill python-box einops omegaconf lightning addict fast-simplification \
+      open3d gradio bottle tornado
+
+# SkinTokens в режиме "Headless (Blender)" запускает свой сервер внутри
+# Blender; его Python нужны эти пакеты (так же делает install.py ноды).
+RUN set -eux; BPY="$(ls -d /opt/blender/*/python/bin/python3* | head -1)"; \
+    "$BPY" -m ensurepip; \
+    "$BPY" -m pip install --no-cache-dir bottle dill scipy trimesh tornado
+
+# RTX Video Super Resolution (необязательная нода, в workflow Mesh Processing
+# она отключена). nvidia-vfx есть только на индексе NVIDIA; не встанет —
+# сборка идёт дальше, нода просто не загрузится.
+RUN pip3 install --no-cache-dir --no-build-isolation nvidia-vfx --index-url https://pypi.nvidia.com \
+    || echo "⚠️ nvidia-vfx не установился — нода RTX Video Super Resolution будет недоступна"
+
 # Fast Merge: быстрый нативный режим. В репозитории лежит только Windows-DLL;
 # собираем ту же C++-библиотеку под Linux и кладём под тем же именем —
 # ctypes грузит её по пути, расширение файла ему безразлично. Без неё нода

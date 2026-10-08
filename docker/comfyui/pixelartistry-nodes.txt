@@ -14,3 +14,13 @@ LODTailor-Bake-Forger Mstafa-awad/LODTailor-Bake-Forger f13589c22558e3ca49dfa87d
 Trellis2-Mesh-Encoder Mstafa-awad/Trellis2-Mesh-Encoder 860313e67f0f69d402310dc325707bab8bec2fe9
 ComfyUI_LODsmith_Merge_Watertight Mstafa-awad/ComfyUI_LODsmith_Merge_Watertight 5da6dd69c02d0f3d4ae743d090cfac79aefe7f96
 WTiVo-FastMergeByDistance Mstafa-awad/WTiVo-FastMergeByDistance 5392949165ceed1e74448b1949d6e0dc9b34dd92
+
+# From PixelArtistry's video workflows (Mesh Processing, Character Design,
+# SkinTokens) and their Trellis2 / Trellis2-GGUF / SkinTokens / Texture
+# Projection installers. Pinned to the commits current on 2026-10-08.
+ComfyUI-Trellis2-GGUF Aero-Ex/ComfyUI-Trellis2-GGUF b3b9e951874c5fb5c936566c93b908299be08b2c
+Texture_Projection-Nodes Aero-Ex/Texture_Projection-Nodes 75e8511e18ab28c71b5e7b0188a8dc63ee386d54
+ComfyUI-SkinTokens Aero-Ex/ComfyUI-SkinTokens 92d844dec46a210e22940deb8c1eef7088a1e598
+ComfyUI-CuMesh visualbruno/ComfyUI-CuMesh 966572464b3d01e6bea2cd6672e4ff26fce69bd5
+one-node-flux-2-klein yanokusnir-ai/one-node-flux-2-klein 7827d1e4f1a51837c3e77b045ef56a2c34564c3f
+Nvidia_RTX_Nodes_ComfyUI Comfy-Org/Nvidia_RTX_Nodes_ComfyUI e5a4c2f3d2735202a45da103980b697e746cfb4f

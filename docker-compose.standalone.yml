@@ -17,6 +17,7 @@
 #   ... --profile kimodo   text-to-motion (Kimodo)
 #   ... --profile mocap    video-to-motion (MoCapAnything)
 #   ... --profile gpu      all three
+#   ... --profile mesh2motion   Mesh2Motion web app (rigging/animation in the browser)
 # e.g. docker compose -f docker-compose.standalone.yml --env-file .env.standalone --profile rig up -d --build
 #
 # Full walkthrough: docs/DOCKER_STANDALONE.md
@@ -150,6 +151,17 @@ services:
     volumes:
       - genstudio-mocaptools-data:/data
     deploy: *gpu
+
+  # Mesh2Motion: a separate browser app (no GPU, no data of its own -- files
+  # stay in the browser). Open http://<server>:${MESH2MOTION_PORT:-3002}.
+  mesh2motion:
+    profiles: ["mesh2motion"]
+    build:
+      context: ./docker/mesh2motion
+    image: 3dgenstudio-mesh2motion:latest
+    restart: unless-stopped
+    ports:
+      - "${MESH2MOTION_PORT:-3002}:80"
 
 volumes:
   genstudio-standalone-data:

@@ -99,3 +99,22 @@ docker compose logs -f comfyui
   отключить (выделить → Ctrl+B). Следом идёт LODTailor, который перестраивает
   меш воксельным ремешем в Blender, — результат обычно получается замкнутым,
   но без гарантий WTiVo: проверяйте в Blender (3D Print Toolbox → Check All).
+
+### Видео-workflow PixelArtistry (Mesh Processing, Character Design, SkinTokens)
+
+Добавлены паки из их установщиков (`pixelartistry-nodes.txt`): ComfyUI-Trellis2-GGUF,
+Texture_Projection-Nodes, ComfyUI-SkinTokens, ComfyUI-CuMesh, one-node-flux-2-klein,
+Nvidia_RTX_Nodes_ComfyUI. Скрипт моделей докачивает DINOv3 (для Trellis2),
+веса SkinTokens и конфиг Qwen3-0.6B.
+
+Что учесть на CMP 90HX (Ampere, 10 ГБ):
+
+* **Mesh Processing**: в узле `UNETLoader` выбран `flux-2-klein-9b-nvfp4` — NVFP4
+  работает только на RTX 50 (Blackwell). Выберите там свой
+  `Flux 2/fluxKleinFP8_flux2Klein9bFp8.safetensors`. LoRA `Alb_LoRaV3_000004750` и
+  `Flux2-Klein-9B-consistency-V2` и VAE `full_encoder_small_decoder` скачайте по
+  ссылкам из заметки в самом workflow.
+* **RTX Video Super Resolution** зависит от `nvidia-vfx` с индекса NVIDIA; если он
+  не встал, нода не загрузится (в workflow она и так отключена).
+* **Character Design** — модели Krea-2 по ссылкам из заметки в workflow.
+* **SkinTokens** рендерит через Blender из образа (режим «Headless (Blender)»).
