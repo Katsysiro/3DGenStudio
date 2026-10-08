@@ -39,8 +39,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /workspace
 
 # Клонируем официальный репозиторий ComfyUI.
-# COMFYUI_REF=v0.38.0 — версия, с которой тестирует автор 3D Gen Studio;
-# по умолчанию, как и раньше, свежий master.
+# Здесь берётся master; конкретная версия закрепляется ближе к концу файла
+# (ARG COMFYUI_VERSION), чтобы её смена не пересобирала весь образ.
 ARG COMFYUI_REF=master
 RUN git clone https://github.com/comfyanonymous/ComfyUI.git /workspace/comfyui && \
     git -C /workspace/comfyui checkout "$COMFYUI_REF"
@@ -240,6 +240,19 @@ RUN for m in numpy torch flash_attn sageattention cumesh o_voxel flex_gemm nvdif
       else echo "FAIL  import $m (exit $?)"; fi; \
     done | tee -a /opt/genstudio-install-report.txt; \
     echo; echo "===== 3D Gen Studio: итог установки ====="; cat /opt/genstudio-install-report.txt
+
+# Версия ComfyUI. Клон выше берёт master, а master ломает ноды без
+# предупреждения: ComfyUI 0.39 (7 окт. 2026) стал передавать в слои
+# аргументы input_act/act_weight, которых не знает ComfyUI-GGUF, и любой
+# GGUF-энкодер/модель падает с "unexpected keyword argument 'input_act'".
+# Поэтому здесь закрепляется версия, с которой тестирует 3D Gen Studio.
+# Слой стоит в конце нарочно: смена версии пересобирает только его, а не
+# CUDA-расширения выше. PIP_CONSTRAINT удерживает torch/numpy/kornia.
+ARG COMFYUI_VERSION=v0.38.0
+RUN git -C /workspace/comfyui fetch -q --tags origin || true; \
+    git -C /workspace/comfyui checkout -q "$COMFYUI_VERSION" && \
+    pip3 install --no-cache-dir -r /workspace/comfyui/requirements.txt && \
+    echo "ComfyUI: $(git -C /workspace/comfyui describe --tags --always)"
 
 COPY entrypoint.sh /entrypoint.sh
 

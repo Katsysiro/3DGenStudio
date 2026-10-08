@@ -528,7 +528,8 @@
 				"Q5": { "FileName": "flux-2-klein-9b-Q5_K_M.gguf",   "Url": "https://huggingface.co/unsloth/FLUX.2-klein-9B-GGUF/resolve/main/flux-2-klein-9b-Q5_K_M.gguf?download=true",   "Size": 7.0 },
 				"Q4": { "FileName": "flux-2-klein-9b-Q4_K_M.gguf",   "Url": "https://huggingface.co/unsloth/FLUX.2-klein-9B-GGUF/resolve/main/flux-2-klein-9b-Q4_K_M.gguf?download=true",   "Size": 5.9 },
 				"Q3": { "FileName": "flux-2-klein-9b-Q3_K_M.gguf",   "Url": "https://huggingface.co/unsloth/FLUX.2-klein-9B-GGUF/resolve/main/flux-2-klein-9b-Q3_K_M.gguf?download=true",   "Size": 4.8 },
-				"Q2": { "FileName": "flux-2-klein-9b-Q2_K.gguf",   "Url": "https://huggingface.co/unsloth/FLUX.2-klein-9B-GGUF/resolve/main/flux-2-klein-9b-Q2_K.gguf?download=true",   "Size": 4.0 }
+				"Q2": { "FileName": "flux-2-klein-9b-Q2_K.gguf",   "Url": "https://huggingface.co/unsloth/FLUX.2-klein-9B-GGUF/resolve/main/flux-2-klein-9b-Q2_K.gguf?download=true",   "Size": 4.0 },
+				"FP8 (local file)": { "FileName": "Flux 2/fluxKleinFP8_flux2Klein9bFp8.safetensors", "Size": 9.0 }
 			},
 			"VAE":         [{ "FileName": "flux2-vae.safetensors",                        "Url": "https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/vae/flux2-vae.safetensors?download=true",                                     "Size": 0.3  }],
 			"TextEncoder": { "FileName": "qwen_3_8b_fp8mixed.safetensors", "Url": "https://huggingface.co/Comfy-Org/vae-text-encorder-for-flux-klein-9b/resolve/main/split_files/text_encoders/qwen_3_8b_fp8mixed.safetensors?download=true",          "Size": 5.6 },

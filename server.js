@@ -11646,6 +11646,20 @@ async function installSetupWorkflow(workflowConfig, diffusionModelFileName = '',
     : rawJson;
   const workflowJson = JSON.parse(substitutedJson);
 
+  // The setup workflows load their diffusion model with ComfyUI-GGUF's
+  // UnetLoaderGGUF, which reads .gguf files only. A quality entry may instead
+  // name a .safetensors file (e.g. an FP8 checkpoint the user already has, see
+  // "FP8 (local file)" in setup.json); swap in the stock UNETLoader for it, or
+  // the workflow fails at load time.
+  if (diffusionModelFileName && !/\.gguf$/i.test(diffusionModelFileName)) {
+    for (const node of Object.values(workflowJson)) {
+      if (node?.class_type === 'UnetLoaderGGUF' && node.inputs?.unet_name === diffusionModelFileName) {
+        node.class_type = 'UNETLoader';
+        node.inputs = { ...node.inputs, weight_dtype: 'default' };
+      }
+    }
+  }
+
   const parsedWorkflow = parseComfyWorkflow(workflowJson);
   const availableParameters = new Map(parsedWorkflow.inputs.map(input => [input.id, input]));
   const availableOutputs = new Map(parsedWorkflow.outputs.map(output => [String(output.nodeId), output]));

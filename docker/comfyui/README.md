@@ -32,6 +32,10 @@ SAM3, Qwen Image и т.д. — нужен свежий ComfyUI, автор те�
 
 ## Что ещё изменено
 
+* **Версия ComfyUI закреплена на v0.38.0** (`ARG COMFYUI_VERSION`). На свежем
+  master (0.39, 7 окт. 2026) ComfyUI-GGUF падает с
+  `unexpected keyword argument 'input_act'`. Слой стоит в конце Dockerfile,
+  поэтому смена версии пересобирает только его.
 * **CUDA-расширения Trellis2** (cumesh, o_voxel, flex_gemm, nvdiffrast) собираются
   из исходников: у автора готовые Linux-колёса есть только для Python 3.12/3.13 и
   torch 2.7/2.9/2.11, под ваши Python 3.10 + torch 2.8 их нет.
