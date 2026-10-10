@@ -320,6 +320,9 @@ RUN set -eu; git init -q /tmp/pa; \
     rm -rf /tmp/pa; ls /opt/pixelartistry-workflows
 
 COPY pixelartistry-models.sh /opt/pixelartistry-models.sh
+# Исправления чужих нод под этот ComfyUI; entrypoint применяет их при каждом
+# старте к копиям в томе custom_nodes (см. patches/*.py).
+COPY patches /opt/genstudio-patches
 
 # Версия ComfyUI. Клон выше берёт master, а master ломает ноды без
 # предупреждения: ComfyUI 0.39 (7 окт. 2026) стал передавать в слои

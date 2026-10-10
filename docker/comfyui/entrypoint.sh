@@ -39,6 +39,12 @@ if [ -d /opt/genstudio-nodes ]; then
   done
 fi
 
+# 7a. Патчи к нодам (идемпотентны: уже применённые пропускаются).
+if [ -f /opt/genstudio-patches/lodtailor_mesh_counts.py ]; then
+  python3 /opt/genstudio-patches/lodtailor_mesh_counts.py \
+    /workspace/comfyui/custom_nodes/LODTailor-The-Mesh-Trimmer-ComfyuiNode/__init__.py || true
+fi
+
 # 7б. Workflow PixelArtistry (./user — тоже том). Кладутся один раз: если
 #     папка уже есть, ваши правки в них не перезаписываются.
 WF_DIR=/workspace/comfyui/user/default/workflows/PixelArtistry
