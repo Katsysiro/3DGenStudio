@@ -44,6 +44,10 @@ if [ -f /opt/genstudio-patches/lodtailor_mesh_counts.py ]; then
   python3 /opt/genstudio-patches/lodtailor_mesh_counts.py \
     /workspace/comfyui/custom_nodes/LODTailor-The-Mesh-Trimmer-ComfyuiNode/__init__.py || true
 fi
+if [ -f /opt/genstudio-patches/bakeforger_gpu_backend.py ]; then
+  python3 /opt/genstudio-patches/bakeforger_gpu_backend.py \
+    /workspace/comfyui/custom_nodes/LODTailor-Bake-Forger/__init__.py || true
+fi
 
 # 7б. Workflow PixelArtistry (./user — тоже том). Кладутся один раз: если
 #     папка уже есть, ваши правки в них не перезаписываются.

@@ -323,6 +323,10 @@ COPY pixelartistry-models.sh /opt/pixelartistry-models.sh
 # Исправления чужих нод под этот ComfyUI; entrypoint применяет их при каждом
 # старте к копиям в томе custom_nodes (см. patches/*.py).
 COPY patches /opt/genstudio-patches
+# Bake Forger (после патча): какой GPU-бэкенд Cycles пробовать. OptiX на CMP 90HX
+# обнаруживается, но падает при запуске; CUDA работает. Переопределяется в
+# environment: вашего docker-compose.yml (например "OPTIX,CUDA" на RTX).
+ENV BAKEFORGER_GPU_BACKENDS=CUDA
 
 # Версия ComfyUI. Клон выше берёт master, а master ломает ноды без
 # предупреждения: ComfyUI 0.39 (7 окт. 2026) стал передавать в слои
