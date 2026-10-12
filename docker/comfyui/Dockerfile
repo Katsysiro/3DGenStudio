@@ -224,6 +224,23 @@ RUN set -eux; mkdir -p /tmp/ext; cd /tmp/ext; \
     pip3 install --no-cache-dir --no-build-isolation ./TRELLIS.2/o-voxel; \
     cd /; rm -rf /tmp/ext
 
+# nvdiffrast 0.4 описывает пакет только в pyproject.toml ([project]), а
+# setuptools 59 из Ubuntu 22.04 этого не понимает: слой выше ставит лишь
+# CUDA-библиотеку под именем "UNKNOWN", без пакета nvdiffrast — и o_voxel,
+# а за ним ComfyUI-Trellis2 и Trellis2-GGUF, падают с "No module named
+# 'nvdiffrast'". Здесь он пересобирается со свежим setuptools. Отдельный слой,
+# чтобы не пересобирать CuMesh/FlexGEMM/o_voxel выше.
+RUN set -eux; \
+    pip3 install --no-cache-dir "setuptools>=64,<76" wheel ninja; \
+    pip3 uninstall -y UNKNOWN || true; \
+    git init -q /tmp/nvdiffrast; \
+    git -C /tmp/nvdiffrast fetch -q --depth 1 https://github.com/NVlabs/nvdiffrast 253ac4fcea7de5f396371124af597e6cc957bfae; \
+    git -C /tmp/nvdiffrast checkout -q FETCH_HEAD; \
+    pip3 install --no-cache-dir --no-build-isolation --force-reinstall --no-deps /tmp/nvdiffrast; \
+    rm -rf /tmp/nvdiffrast; \
+    python3 -c "import importlib.util as u, sys; sys.exit(0 if u.find_spec('nvdiffrast') and u.find_spec('_nvdiffrast_c') else 1)"; \
+    pip3 show nvdiffrast | head -2
+
 # Необязательное: PBR-рендер nvdiffrec (нужен только одному рендереру Trellis2).
 RUN pip3 install --no-cache-dir --no-build-isolation \
       "git+https://github.com/JeffreyXiang/nvdiffrec.git@b296927cc7fd01c2ac1087c8065c4d7248f72da4" \
