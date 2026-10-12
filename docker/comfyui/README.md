@@ -118,3 +118,18 @@ Nvidia_RTX_Nodes_ComfyUI. Скрипт моделей докачивает DINOv
   не встал, нода не загрузится (в workflow она и так отключена).
 * **Character Design** — модели Krea-2 по ссылкам из заметки в workflow.
 * **SkinTokens** рендерит через Blender из образа (режим «Headless (Blender)»).
+
+### Pixal3D MultiView и Flux2 Klein image edit
+
+Ноды для `MultiView_Pixal3D_Native`, `MultiView_Pixal3D_PixelArtistry`,
+`MeshTexturing_with_Pixal3D_PixelArtistry` и `image_flux2_klein_image_edit_9b_base`
+уже в образе: нативные есть в ComfyUI v0.38.0, остальные в ComfyUI-Trellis2
+(закреплён последний коммит). Модели:
+
+* скрипт моделей докачивает `pixal3d_multiview_int8_convrot.safetensors` и VAE
+  `full_encoder_small_decoder.safetensors`;
+* `flux-2-klein-base-9b-fp8.safetensors` лежит в закрытом репозитории BFL: примите
+  лицензию на странице модели и запустите скрипт с `HF_TOKEN=hf_...`. Без токена
+  модель пропускается;
+* `Trellis2LoadModel` с `TencentARC/Pixal3D` при первом запуске сам скачивает
+  репозиторий целиком в `models/TencentARC/Pixal3D` (десятки ГБ).

@@ -6,6 +6,8 @@
 #   docker compose exec comfyui bash /opt/pixelartistry-models.sh
 # or on the host with the models folder as the argument:
 #   bash pixelartistry-models.sh /mnt/storage/comfy_data/models
+# Gated repos (FLUX.2 Klein base) need a Hugging Face token with the licence
+# accepted on the model page: HF_TOKEN=hf_... bash pixelartistry-models.sh
 set -u
 MODELS="${1:-/workspace/comfyui/models}"
 HF=https://huggingface.co
@@ -28,7 +30,9 @@ fetch() {  # folder file url [exact]
   missing=$((missing+1))
   echo "  [DL]   $1/$2"
   mkdir -p "$dir"
-  if curl -fL --retry 3 -C - -o "$target.part" "$3"; then
+  local auth=()
+  [ -n "${HF_TOKEN:-}" ] && auth=(-H "Authorization: Bearer $HF_TOKEN")
+  if curl -fL --retry 3 -C - "${auth[@]}" -o "$target.part" "$3"; then
     mv "$target.part" "$target"
   else
     echo "  [FAIL] $3"; failed=$((failed+1))
@@ -38,6 +42,8 @@ fetch() {  # folder file url [exact]
 echo "Models folder: $MODELS"
 fetch diffusion_models    trellis_2_int8_convrot.safetensors        "$HF/Comfy-Org/TRELLIS.2/resolve/main/diffusion_models/trellis_2_int8_convrot.safetensors"
 fetch diffusion_models    pixal3d_int8_convrot.safetensors          "$HF/Comfy-Org/Pixal3D/resolve/main/diffusion_models/pixal3d_int8_convrot.safetensors"
+# Native multi-view Pixal3D (MultiView_Pixal3D_Native workflow).
+fetch diffusion_models    pixal3d_multiview_int8_convrot.safetensors "$HF/Comfy-Org/Pixal3D/resolve/main/diffusion_models/pixal3d_multiview_int8_convrot.safetensors"
 fetch vae                 trellis_2_shape_vae_bf16.safetensors      "$HF/Comfy-Org/Pixal3D/resolve/main/vae/trellis_2_shape_vae_bf16.safetensors"
 fetch vae                 trellis_2_texture_vae_bf16.safetensors    "$HF/Comfy-Org/Pixal3D/resolve/main/vae/trellis_2_texture_vae_bf16.safetensors"
 fetch clip_vision         dino_v3_L_naf_fp32.safetensors            "$HF/Comfy-Org/Pixal3D/resolve/main/clip_vision/dino_v3_L_naf_fp32.safetensors"
@@ -77,6 +83,17 @@ QW=$HF/Qwen/Qwen3-0.6B/resolve/main
 for f in config.json generation_config.json tokenizer.json tokenizer_config.json vocab.json merges.txt; do
   fetch Qwen3-0.6B "$f" "$QW/$f" exact
 done
+
+# FLUX.2 Klein 9B: small-decoder VAE (Mesh Processing, image edit) and the
+# non-distilled base model for image_flux2_klein_image_edit_9b_base. The base
+# repo is gated: without HF_TOKEN it is skipped, not counted as a failure.
+fetch vae                 full_encoder_small_decoder.safetensors    "$HF/black-forest-labs/FLUX.2-small-decoder/resolve/main/full_encoder_small_decoder.safetensors"
+if [ -n "${HF_TOKEN:-}" ]; then
+  fetch diffusion_models  flux-2-klein-base-9b-fp8.safetensors      "$HF/black-forest-labs/FLUX.2-klein-base-9b-fp8/resolve/main/flux-2-klein-base-9b-fp8.safetensors"
+elif [ -z "$(find "$MODELS" -name flux-2-klein-base-9b-fp8.safetensors -size +0 -print -quit 2>/dev/null)" ]; then
+  echo "  [SKIP] diffusion_models/flux-2-klein-base-9b-fp8.safetensors (gated: accept the licence on"
+  echo "         huggingface.co/black-forest-labs/FLUX.2-klein-base-9b-fp8, then rerun with HF_TOKEN=hf_...)"
+fi
 
 echo
 if [ "$failed" -gt 0 ]; then echo "$failed download(s) failed -- run again to resume."; exit 1; fi
